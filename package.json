@@ -1,0 +1,21 @@
+{
+  "name": "chief-of-staff-agent",
+  "version": "1.0.0",
+  "description": "Master agent system for product director weekly analysis",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test-mcp": "node test-mcp.js",
+    "list": "node src/index.js --list",
+    "help": "node src/index.js --help"
+  },
+  "keywords": ["agent", "anthropic", "claude", "automation"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "dotenv": "^16.4.5"
+  }
+}

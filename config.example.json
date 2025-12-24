@@ -1,0 +1,62 @@
+{
+  "team": {
+    "ovTeamMembers": [
+      {
+        "name": "John Doe",
+        "slackId": "U01234567AB",
+        "email": "john.doe@example.com",
+        "role": "Sr PM"
+      },
+      {
+        "name": "Jane Smith",
+        "slackId": "U09876543CD",
+        "email": "jane.smith@example.com",
+        "role": "Sr PM"
+      }
+    ],
+    "pmEmailAddresses": [
+      "john.doe@example.com",
+      "jane.smith@example.com"
+    ],
+    "jiraTeams": ["Team Alpha", "Team Beta", "Team Gamma", "Team Delta"]
+  },
+  "slack": {
+    "channels": {
+      "teamChannels": [
+        "C01234567AB",
+        "C09876543CD",
+        "C0ABCDEF123"
+      ],
+      "productGeneral": "C01234567AB",
+      "csmChannels": [
+        "C0XYZ789ABC",
+        "C0DEF456GHI"
+      ],
+      "salesChannels": [
+        "CHANNEL_ID_FOR_SALES"
+      ]
+    },
+    "myslackuserId": "U0EXAMPLE123"
+  },
+  "calendar": {
+    "name": "Example Company"
+  },
+  "jira": {
+    "ovOkrBoardId": "12345678",
+    "aiOkrBoardId": "87654321",
+    "projectKey": "PROJ"
+  },
+  "confluence": {
+    "vocPageId": "1234567890",
+    "spaceKey": "EXAMPLE"
+  },
+  "hubspot": {
+    "productFilter": "ExampleProduct"
+  },
+  "mixpanel": {
+    "projectId": "your_mixpanel_project_id"
+  },
+  "gong": {
+    "enabled": true
+  }
+}
