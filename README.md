@@ -97,13 +97,13 @@ You'll need MCP servers configured in Claude Desktop for:
     "ovTeamMembers": [
       {
         "name": "Team Member Name",
-        "slackId": "U1234567890",
-        "email": "email@workleap.com",
+        "slackId": "U1",
+        "email": "email@w.com",
         "role": "Sr PM"
       }
     ],
     "pmEmailAddresses": ["email@workleap.com"],
-    "jiraTeams": ["OV - Squad 1", "OV - Squad 2"]
+    "jiraTeams": ["Team 1", "Team 2"]
   },
   "slack": {
     "channels": {
