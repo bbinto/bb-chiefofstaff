@@ -10,12 +10,21 @@
     "list": "node src/index.js --list",
     "help": "node src/index.js --help"
   },
-  "keywords": ["agent", "anthropic", "claude", "automation"],
+  "keywords": [
+    "agent",
+    "anthropic",
+    "claude",
+    "automation"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "md-to-pdf": "^5.2.5"
   }
 }

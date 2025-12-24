@@ -8,8 +8,16 @@ package-lock.json
 # Configuration (contains sensitive data)
 config.json
 
+# TODOs for myself
+TODO.md
+
 # Generated reports
 reports/
+
+# Manual sources
+manual_sources/*
+BLOGPOST.md
+
 
 # Logs
 *.log

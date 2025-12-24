@@ -21,6 +21,7 @@ class ChiefOfStaffAgent {
     // Define agent execution order
     this.agents = [
       'weekly-recap',
+      'weekly-recap-exec',
       'business-health',
       'product-engineering',
       'okr-progress'

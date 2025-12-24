@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import path from 'path';
+import XLSX from 'xlsx';
 
 /**
  * Agent Runner
@@ -150,11 +151,21 @@ export class AgentRunner {
         // Execute all tools in parallel
         const toolResults = await Promise.all(
           toolUses.map(async (toolUse) => {
-            const toolResult = await this.mcpClient.callTool(toolUse.name, toolUse.input);
+            let toolResult;
+            
+            // Check if it's a custom filesystem tool
+            if (toolUse.name === 'read_file_from_manual_sources' || 
+                toolUse.name === 'list_manual_sources_files') {
+              toolResult = await this.handleCustomTool(toolUse.name, toolUse.input);
+            } else {
+              // Use MCP client for other tools
+              toolResult = await this.mcpClient.callTool(toolUse.name, toolUse.input);
+            }
+            
             return {
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: JSON.stringify(toolResult.content)
+              content: JSON.stringify(toolResult)
             };
           })
         );
@@ -210,7 +221,7 @@ export class AgentRunner {
   }
 
   /**
-   * Build context message with configuration
+   * Build context message with configuration (optimized for token usage)
    */
   buildContextMessage() {
     const today = new Date();
@@ -222,53 +233,51 @@ export class AgentRunner {
     threeDaysAgo.setDate(today.getDate() - 3);
     const threeDaysAgoISO = threeDaysAgo.toISOString().split('T')[0];
 
-    return `# Context and Configuration
+    // Build concise configuration - only include essential values
+    const teamPMs = (this.config.team?.ovTeamMembers || [])
+      .map(m => `${m.name} (${m.email})`)
+      .join(', ');
+    const jiraTeams = (this.config.team?.jiraTeams || []).join(', ');
 
-You have access to the following configuration data:
+    const slackChannels = this.config.slack?.channels || {};
+    const salesChannels = (slackChannels.salesChannels || []).join(', ');
+    const csmChannels = (slackChannels.csmChannels || []).join(', ');
 
-## Team Information
-${JSON.stringify(this.config.team, null, 2)}
+    return `# Configuration (Concise Format)
 
-## Slack Configuration
-${JSON.stringify(this.config.slack, null, 2)}
+## Dates
+Today: ${todayISO} | 7d ago: ${sevenDaysAgoISO} | 3d ago: ${threeDaysAgoISO}
 
-## Calendar Configuration
-${JSON.stringify(this.config.calendar, null, 2)}
+## Team
+PMs: ${teamPMs}
+Jira Teams: ${jiraTeams}
 
-## Jira Configuration
-${JSON.stringify(this.config.jira, null, 2)}
+## Slack
+Sales channels: ${salesChannels || 'None'}
+CSM channels: ${csmChannels || 'None'}
+My user ID: ${this.config.slack?.myslackuserId || 'N/A'}
 
-## Confluence Configuration
-${JSON.stringify(this.config.confluence, null, 2)}
+## Jira
+OKR Board: ${this.config.jira?.ovOkrBoardId || 'N/A'}
+Project: ${this.config.jira?.projectKey || 'N/A'}
 
-## Other Configuration
-- Hubspot: ${JSON.stringify(this.config.hubspot, null, 2)}
-- Mixpanel: ${JSON.stringify(this.config.mixpanel, null, 2)}
-- Gong: ${JSON.stringify(this.config.gong, null, 2)}
+## Confluence
+VoC Page ID: ${this.config.confluence?.vocPageId || 'N/A'}
+Space: ${this.config.confluence?.spaceKey || 'N/A'}
 
-## Date Format Requirements (CRITICAL)
-When calling MCP tools that require date parameters (like \`after\`, \`before\`, \`since\`, \`start_date\`, etc.), you MUST:
-- Use ISO 8601 date format: \`YYYY-MM-DD\` (e.g., "2025-12-16")
-- NEVER use relative date formats like "-7d", "-3d", "last week", etc. in tool parameters
-- Calculate actual dates from the current date
+## Hubspot
+Product filter: ${this.config.hubspot?.productFilter || 'N/A'}
 
-Current date reference:
-- Today: ${todayISO}
-- 7 days ago: ${sevenDaysAgoISO} (use this for "last 7 days" or "past week")
-- 3 days ago: ${threeDaysAgoISO} (use this for "last 3 days")
-
-Example: For "last 7 days", use \`after: "${sevenDaysAgoISO}"\` (NOT "-7d")
-
-Use this configuration to query the appropriate data sources via the available MCP tools.`;
+## Dates (CRITICAL)
+Use ISO format YYYY-MM-DD for date params. Use "${sevenDaysAgoISO}" for "last 7 days", "${threeDaysAgoISO}" for "last 3 days".`;
   }
 
   /**
-   * Build tools schema for Claude from MCP tools
+   * Build tools schema for Claude from MCP tools + custom filesystem tools
    */
   buildToolsSchema() {
     const availableTools = this.mcpClient.getAvailableTools();
-
-    return availableTools.map(tool => ({
+    const mcpTools = availableTools.map(tool => ({
       name: tool.name,
       description: tool.schema.description || `Tool from ${tool.server} server`,
       input_schema: tool.schema.inputSchema || {
@@ -277,5 +286,144 @@ Use this configuration to query the appropriate data sources via the available M
         required: []
       }
     }));
+
+    // Add custom filesystem tools for reading manual_sources
+    const filesystemTools = [
+      {
+        name: 'read_file_from_manual_sources',
+        description: 'Read a file from the manual_sources folder. Excel files (.xlsx, .xls) will be parsed and all sheet data will be returned as JSON. Text files will return their content. Use this to access ARR data and other files in the manual_sources directory.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            filename: {
+              type: 'string',
+              description: 'The name of the file to read from the manual_sources folder (e.g., "Dec 22-ARR Waterfall OV.xlsx")'
+            }
+          },
+          required: ['filename']
+        }
+      },
+      {
+        name: 'list_manual_sources_files',
+        description: 'List all files available in the manual_sources folder. Use this to see what ARR data files are available.',
+        input_schema: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    ];
+
+    return [...mcpTools, ...filesystemTools];
+  }
+
+  /**
+   * Handle custom filesystem tool calls
+   */
+  async handleCustomTool(toolName, args) {
+    if (toolName === 'read_file_from_manual_sources') {
+      const manualSourcesPath = path.resolve(process.cwd(), 'manual_sources');
+      const filePath = path.resolve(manualSourcesPath, args.filename);
+      
+      // Security: ensure the file is within manual_sources directory
+      const resolvedManualSources = path.resolve(manualSourcesPath);
+      if (!filePath.startsWith(resolvedManualSources + path.sep) && filePath !== resolvedManualSources) {
+        throw new Error('Invalid file path: file must be in manual_sources folder');
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return {
+          error: `File not found: ${args.filename}`,
+          availableFiles: fs.readdirSync(manualSourcesPath).join(', ')
+        };
+      }
+
+      // For Excel files, parse and return the data
+      const stats = fs.statSync(filePath);
+      const isExcel = filePath.endsWith('.xlsx') || filePath.endsWith('.xls');
+      
+      if (isExcel) {
+        try {
+          // Read the Excel file
+          const workbook = XLSX.readFile(filePath);
+          
+          // Get all sheet names
+          const sheetNames = workbook.SheetNames;
+          
+          // Parse all sheets into JSON
+          const sheetsData = {};
+          sheetNames.forEach(sheetName => {
+            const worksheet = workbook.Sheets[sheetName];
+            // Convert to JSON with header row
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+              defval: '', // Use empty string for empty cells
+              raw: false // Format values (dates, numbers, etc.)
+            });
+            sheetsData[sheetName] = jsonData;
+          });
+          
+          return {
+            file: args.filename,
+            type: 'Excel file',
+            modified: stats.mtime.toISOString(),
+            sheetNames: sheetNames,
+            data: sheetsData,
+            summary: `Excel file with ${sheetNames.length} sheet(s): ${sheetNames.join(', ')}. Data parsed successfully.`
+          };
+        } catch (error) {
+          return {
+            file: args.filename,
+            type: 'Excel file',
+            error: `Error parsing Excel file: ${error.message}`,
+            modified: stats.mtime.toISOString()
+          };
+        }
+      }
+
+      // For text files, read the content
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        return {
+          file: args.filename,
+          content: content
+        };
+      } catch (error) {
+        return {
+          error: `Error reading file: ${error.message}`,
+          file: args.filename
+        };
+      }
+    }
+
+    if (toolName === 'list_manual_sources_files') {
+      const manualSourcesPath = path.resolve(process.cwd(), 'manual_sources');
+      
+      if (!fs.existsSync(manualSourcesPath)) {
+        return {
+          error: 'manual_sources folder does not exist',
+          path: manualSourcesPath
+        };
+      }
+
+      const files = fs.readdirSync(manualSourcesPath);
+      const fileDetails = files.map(file => {
+        const filePath = path.join(manualSourcesPath, file);
+        const stats = fs.statSync(filePath);
+        return {
+          name: file,
+          size: stats.size,
+          modified: stats.mtime.toISOString(),
+          type: path.extname(file) || 'unknown'
+        };
+      });
+
+      return {
+        folder: 'manual_sources',
+        files: fileDetails,
+        count: files.length
+      };
+    }
+
+    throw new Error(`Unknown custom tool: ${toolName}`);
   }
 }
