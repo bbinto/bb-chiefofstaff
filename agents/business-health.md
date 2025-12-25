@@ -6,7 +6,7 @@ Monitor and report on the business health of Officevibe, including revenue metri
 ## Data Sources
 - Use sheets from manual_sources folder to analyze ARR
   - **Use the `list_manual_sources_files` tool first** to see what files are available
-  - **Use the `read_file_from_manual_sources` tool** to access ARR data files (e.g., "Dec 22-ARR Waterfall OV.xlsx", "Dec 22 - ARR and customers OV data.xlsx")
+  - **Use the `read_file_from_manual_sources` tool** to access ARR data files
   - Note: Excel files will return file metadata. If detailed analysis is needed, note that manual review may be required, but you can use the file information to confirm the data exists and is current.
 - Slack sales channels (deal announcements only for Officevibe and NOT Performance)
 - Confluence Voice of Customer page (Officevibe and NOT Performance)
@@ -44,7 +44,7 @@ You are the Business and Product Health Agent for Officevibe. Your job is to pro
   - Impact on overall ARR
 
 ### 4. Voice of Customer Review
-- Access the VoC Confluence page: https://workleap.atlassian.net/wiki/spaces/SCE/pages/5022581198/VOICE+OF+THE+CUSTOMER
+- Access the VoC Confluence page: (URL stored in config.json)
 - Check for subpages in folder 2026:
   - New entries added in folder 2026 in the past week
   - Updates to existing entries
