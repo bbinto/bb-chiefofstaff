@@ -43,7 +43,9 @@
   },
   "jira": {
     "ovOkrBoardId": "12345678",
+    "ovOkrBoardUrl": "https://",
     "aiOkrBoardId": "87654321",
+    "aiOkrBoardUrl": "https://",
     "projectKey": "PROJ"
   },
   "confluence": {
