@@ -12,11 +12,12 @@ import { ReportGenerator } from './report-generator.js';
  * Orchestrates multiple specialized agents to provide weekly product director insights
  */
 class ChiefOfStaffAgent {
-  constructor() {
+  constructor(dateRange = null) {
     this.mcpClient = null;
     this.config = null;
     this.agentRunner = null;
     this.reportGenerator = new ReportGenerator();
+    this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
 
     // Define agent execution order
     this.agents = [
@@ -77,7 +78,7 @@ class ChiefOfStaffAgent {
     await this.mcpClient.initialize();
 
     // Initialize agent runner
-    this.agentRunner = new AgentRunner(this.mcpClient, this.config);
+    this.agentRunner = new AgentRunner(this.mcpClient, this.config, this.dateRange);
 
     console.log('\nInitialization complete!\n');
   }
@@ -255,10 +256,16 @@ if (args.includes('--help') || args.includes('-h')) {
 Chief of Staff Agent System
 
 Usage:
-  npm start                    Run all agents
-  npm start agent1 agent2      Run specific agents
-  npm start -- --list          List available agents
-  npm start -- --help          Show this help
+  npm start                                          Run all agents
+  npm start agent1 agent2                            Run specific agents
+  npm start -- --start-date YYYY-MM-DD --end-date YYYY-MM-DD   Run with custom date range
+  npm start agent1 agent2 --start-date YYYY-MM-DD --end-date YYYY-MM-DD
+  npm start -- --list                                List available agents
+  npm start -- --help                                Show this help
+
+Options:
+  --start-date YYYY-MM-DD    Start date for data analysis (default: configured days ago, see config.json settings.defaultDays)
+  --end-date YYYY-MM-DD      End date for data analysis (default: today)
 
 Available Agents:
   - weekly-recap              Weekly team catch-up and recap
@@ -269,12 +276,97 @@ Available Agents:
 Examples:
   npm start
   npm start weekly-recap business-health
+  npm start --start-date 2025-12-20 --end-date 2025-12-27
+  npm start weekly-recap --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- --list
 `);
   process.exit(0);
 }
 
-const agent = new ChiefOfStaffAgent();
+// Parse date range arguments
+function parseDateRange(args) {
+  let startDate = null;
+  let endDate = null;
+  
+  const startDateIndex = args.indexOf('--start-date');
+  const endDateIndex = args.indexOf('--end-date');
+  
+  if (startDateIndex !== -1 && args[startDateIndex + 1]) {
+    startDate = args[startDateIndex + 1];
+    // Validate date format YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+      console.error('Error: --start-date must be in YYYY-MM-DD format (e.g., 2025-12-20)');
+      process.exit(1);
+    }
+    // Validate it's a valid date
+    const startDateObj = new Date(startDate + 'T00:00:00');
+    if (isNaN(startDateObj.getTime())) {
+      console.error('Error: --start-date must be a valid date');
+      process.exit(1);
+    }
+  }
+  
+  if (endDateIndex !== -1 && args[endDateIndex + 1]) {
+    endDate = args[endDateIndex + 1];
+    // Validate date format YYYY-MM-DD
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      console.error('Error: --end-date must be in YYYY-MM-DD format (e.g., 2025-12-27)');
+      process.exit(1);
+    }
+    // Validate it's a valid date
+    const endDateObj = new Date(endDate + 'T00:00:00');
+    if (isNaN(endDateObj.getTime())) {
+      console.error('Error: --end-date must be a valid date');
+      process.exit(1);
+    }
+  }
+  
+  // Validate that start date is before end date if both are provided
+  if (startDate && endDate) {
+    const startDateObj = new Date(startDate + 'T00:00:00');
+    const endDateObj = new Date(endDate + 'T00:00:00');
+    if (startDateObj > endDateObj) {
+      console.error('Error: --start-date must be before or equal to --end-date');
+      process.exit(1);
+    }
+  }
+  
+  if (startDate || endDate) {
+    return { startDate, endDate };
+  }
+  
+  return null;
+}
+
+// Remove date arguments from args array to get agent names
+function extractAgentNames(args) {
+  const agentNames = [];
+  let skipNext = false;
+  
+  for (let i = 0; i < args.length; i++) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    
+    if (args[i] === '--start-date' || args[i] === '--end-date') {
+      skipNext = true;
+      continue;
+    }
+    
+    // Skip other flags but keep agent names
+    if (!args[i].startsWith('--')) {
+      agentNames.push(args[i]);
+    }
+  }
+  
+  return agentNames.length > 0 ? agentNames : null;
+}
+
+const dateRange = parseDateRange(args);
+const specificAgents = extractAgentNames(args);
+
+const agent = new ChiefOfStaffAgent(dateRange);
 
 if (args.includes('--list') || args.includes('-l')) {
   agent.listAgents();
@@ -282,7 +374,6 @@ if (args.includes('--list') || args.includes('-l')) {
 }
 
 // Run with specific agents if provided
-const specificAgents = args.length > 0 ? args : null;
 agent.run(specificAgents).catch(error => {
   console.error('Execution failed:', error);
   process.exit(1);

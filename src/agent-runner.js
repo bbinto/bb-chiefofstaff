@@ -8,9 +8,10 @@ import XLSX from 'xlsx';
  * Executes individual agents based on their markdown instructions
  */
 export class AgentRunner {
-  constructor(mcpClient, config) {
+  constructor(mcpClient, config, dateRange = null) {
     this.mcpClient = mcpClient;
     this.config = config;
+    this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
     this.anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY
     });
@@ -226,12 +227,44 @@ export class AgentRunner {
   buildContextMessage() {
     const today = new Date();
     const todayISO = today.toISOString().split('T')[0]; // YYYY-MM-DD format
-    const sevenDaysAgo = new Date(today);
-    sevenDaysAgo.setDate(today.getDate() - 7);
-    const sevenDaysAgoISO = sevenDaysAgo.toISOString().split('T')[0];
-    const threeDaysAgo = new Date(today);
-    threeDaysAgo.setDate(today.getDate() - 3);
-    const threeDaysAgoISO = threeDaysAgo.toISOString().split('T')[0];
+    
+    // Get default days from config, default to 7 if not specified
+    const defaultDays = this.config?.settings?.defaultDays || 7;
+    
+    // Use provided date range or calculate defaults
+    let endDateISO = todayISO;
+    let startDateISO = null;
+    let threeDaysAgoISO = null;
+    
+    if (this.dateRange) {
+      endDateISO = this.dateRange.endDate || todayISO;
+      
+      // If start date is not provided, default to configured days before end date
+      if (this.dateRange.startDate) {
+        startDateISO = this.dateRange.startDate;
+      } else {
+        // Default start date to configured days before end date
+        const endDateObj = new Date(endDateISO + 'T00:00:00');
+        const defaultDaysAgo = new Date(endDateObj);
+        defaultDaysAgo.setDate(endDateObj.getDate() - defaultDays);
+        startDateISO = defaultDaysAgo.toISOString().split('T')[0];
+      }
+      
+      // Calculate 3 days ago from end date
+      const endDateObj = new Date(endDateISO + 'T00:00:00');
+      const threeDaysAgo = new Date(endDateObj);
+      threeDaysAgo.setDate(endDateObj.getDate() - 3);
+      threeDaysAgoISO = threeDaysAgo.toISOString().split('T')[0];
+    } else {
+      // Default behavior: calculate configured days ago and 3 days ago
+      const defaultDaysAgo = new Date(today);
+      defaultDaysAgo.setDate(today.getDate() - defaultDays);
+      startDateISO = defaultDaysAgo.toISOString().split('T')[0];
+      
+      const threeDaysAgo = new Date(today);
+      threeDaysAgo.setDate(today.getDate() - 3);
+      threeDaysAgoISO = threeDaysAgo.toISOString().split('T')[0];
+    }
 
     // Build concise configuration - only include essential values
     const teamPMs = (this.config.team?.ovTeamMembers || [])
@@ -243,10 +276,12 @@ export class AgentRunner {
     const salesChannels = (slackChannels.salesChannels || []).join(', ');
     const csmChannels = (slackChannels.csmChannels || []).join(', ');
 
+    const dateRangeText = `Start: ${startDateISO} | End: ${endDateISO}${threeDaysAgoISO ? ` | 3d ago from end: ${threeDaysAgoISO}` : ''}`;
+
     return `# Configuration (Concise Format)
 
 ## Dates
-Today: ${todayISO} | 7d ago: ${sevenDaysAgoISO} | 3d ago: ${threeDaysAgoISO}
+${dateRangeText}
 
 ## Team
 PMs: ${teamPMs}
@@ -269,7 +304,7 @@ Space: ${this.config.confluence?.spaceKey || 'N/A'}
 Product filter: ${this.config.hubspot?.productFilter || 'N/A'}
 
 ## Dates (CRITICAL)
-Use ISO format YYYY-MM-DD for date params. Use "${sevenDaysAgoISO}" for "last 7 days", "${threeDaysAgoISO}" for "last 3 days".`;
+Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date range (period) from ${startDateISO} to ${endDateISO} (includes both start and end dates). When querying data sources, use parameters like after: "${startDateISO}" (inclusive) and before: "${endDateISO}" or onOrBefore: "${endDateISO}" (depending on API) to query data within this period.${threeDaysAgoISO ? ` For "last 3 days", use "${threeDaysAgoISO}".` : ''}`;
   }
 
   /**

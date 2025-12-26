@@ -7,7 +7,7 @@ A complete, production-ready master agent system that runs weekly analysis for a
 1. **Weekly Recap** - Team communications, activities, and customer interview preparation
 2. **Business Health** - ARR metrics, deals, churn, and voice of customer
 3. **Product Engineering** - Development progress, launches, usage metrics, and customer calls
-4. **OKR Progress** - Strategic initiative tracking for Officevibe and Workleap AI
+4. **OKR Progress** - Strategic initiative tracking for e.g. your product teams
 
 ## Key Features
 

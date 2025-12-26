@@ -9,7 +9,7 @@ package-lock.json
 config.json
 
 # TODOs for myself
-TODO.md
+TODO-PRIVATE.md
 
 # Generated reports
 reports/
@@ -26,6 +26,7 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
+.gitattributes
 
 # IDE
 .vscode/

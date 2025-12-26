@@ -61,5 +61,8 @@
   },
   "gong": {
     "enabled": true
+  },
+  "settings": {
+    "defaultDays": 7
   }
 }
