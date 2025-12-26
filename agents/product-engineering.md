@@ -5,7 +5,7 @@ Track and report on product development activities, engineering progress, featur
 
 ## Data Sources
 - Jira/Atlassian (ticket completion for OV teams)
-- Slack #wl-product-general (product launches)
+- Slack channels from config.json: teamChannels, productGeneral, productFeedback (product launches and feedback)
 - Mixpanel (feature usage metrics)
 - Gong (PM customer calls)
 
@@ -35,7 +35,9 @@ You are the Product Development and Engineering Agent. Your job is to provide in
   - Any blockers or delays?
 
 ### 2. Product Launches Review
-- Search #wl-product-general Slack channel for launch announcements in the last 7 days
+- Search Slack channels from config.json for launch announcements in the last 7 days:
+  - Use channels from `config.slack.channels.productGeneral` for product launch announcements
+  - Use channels from `config.slack.channels.productFeedback` for product feedback
   - Calculate the date 7 days ago and use ISO format (e.g., `after: "2025-12-16"` for searches)
   - Use the current date to calculate: current date minus 7 days = start date
 - Look for messages from team members (configured PM list)
@@ -148,6 +150,11 @@ For each call:
 - Notable patterns or trends
 - Areas requiring attention
 - Opportunities identified
+
+
+## Output Delivery
+- Convert .md report file into .pdf in reports folder
+- Send pdf to bbinto@gmail.com
 
 ## Success Criteria
 - All data sources are queried successfully

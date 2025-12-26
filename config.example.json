@@ -28,9 +28,10 @@
         "C0ABCDEF123"
       ],
       "productGeneral": "C01234567AB",
+      "productFeedback": ["C01234567AB", "C01234567AB"],
       "csmChannels": [
         "C0XYZ789ABC",
-        "C0DEF456GHI"
+        "C01234567AB"
       ],
       "salesChannels": [
         "CHANNEL_ID_FOR_SALES"
