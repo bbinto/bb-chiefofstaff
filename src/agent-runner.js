@@ -303,6 +303,11 @@ Space: ${this.config.confluence?.spaceKey || 'N/A'}
 ## Hubspot
 Product filter: ${this.config.hubspot?.productFilter || 'N/A'}
 
+## Thought Leadership
+RSS Feeds: ${(this.config.thoughtleadership?.rssFeeds || []).join(', ') || 'None'}
+Web Sources: ${(this.config.thoughtleadership?.webSources || []).join(', ') || 'None'}
+Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || []).join(', ') || 'None'}
+
 ## Dates (CRITICAL)
 Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date range (period) from ${startDateISO} to ${endDateISO} (includes both start and end dates). When querying data sources, use parameters like after: "${startDateISO}" (inclusive) and before: "${endDateISO}" or onOrBefore: "${endDateISO}" (depending on API) to query data within this period.${threeDaysAgoISO ? ` For "last 3 days", use "${threeDaysAgoISO}".` : ''}`;
   }

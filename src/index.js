@@ -24,7 +24,8 @@ class ChiefOfStaffAgent {
       'weekly-recap',
       'business-health',
       'product-engineering',
-      'okr-progress'
+      'okr-progress',
+      'thoughtleadership-updates'
     ];
   }
 
@@ -272,6 +273,7 @@ Available Agents:
   - business-health           Officevibe business and product health
   - product-engineering       Product development and engineering updates
   - okr-progress             OKR updates and progress tracking
+  - thoughtleadership-updates Product thought leadership and new topics
 
 Examples:
   npm start

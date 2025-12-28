@@ -62,6 +62,18 @@
   "gong": {
     "enabled": true
   },
+  "thoughtleadership": {
+    "rssFeeds": [
+      "https://www.mindtheproduct.com/feed/"
+    ],
+    "webSources": [
+      "https://www.mindtheproduct.com"
+
+    ],
+    "industryNewsSources": [
+      "https://stratechery.com"
+    ]
+  },
   "settings": {
     "defaultDays": 7
   }

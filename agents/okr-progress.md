@@ -13,7 +13,7 @@ You are the OKR Updates and Progress Agent. Your job is to track progress on str
 
 ### 1. Officevibe OKR Board Analysis
 - Access the OV OKR Ideas Board using `config.jira.ovOkrBoardUrl` (Board ID: `config.jira.ovOkrBoardId`)
-- Identify any significant changes in the past 2 days:
+- Identify any significant changes in the past 5 days:
   - New ideas added
   - Status changes (ideation → planned → in progress → done)
   - Priority changes
