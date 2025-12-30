@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import path from 'path';
 import XLSX from 'xlsx';
+import pdfParse from 'pdf-parse';
 
 /**
  * Agent Runner
@@ -17,12 +18,13 @@ export class AgentRunner {
     });
     this.model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
     
-    // Rate limiting: 30,000 tokens per minute = ~500 tokens per second
+    // Rate limiting: 30,000 tokens per minute
     // Add delay between calls to stay under limit
-    this.minDelayBetweenCalls = 2000; // 2 seconds minimum
+    this.minDelayBetweenCalls = 5000; // 5 seconds minimum (more conservative)
     this.lastCallTime = 0;
     this.tokenUsageWindow = []; // Track tokens used in the last minute
-    this.maxTokensPerMinute = 28000; // Leave some buffer (30k limit)
+    this.maxTokensPerMinute = 25000; // More conservative buffer (30k limit - 5k safety margin)
+    this.consecutiveRateLimitErrors = 0; // Track consecutive rate limit errors
   }
 
   /**
@@ -37,9 +39,41 @@ export class AgentRunner {
   }
 
   /**
+   * Rough estimate of token count from messages (approximation: ~4 chars per token)
+   */
+  estimateTokenCount(messages, tools) {
+    let totalChars = 0;
+    
+    // Count characters in messages
+    for (const msg of messages) {
+      if (typeof msg.content === 'string') {
+        totalChars += msg.content.length;
+      } else if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'text' && block.text) {
+            totalChars += block.text.length;
+          } else if (block.type === 'tool_use' && block.input) {
+            totalChars += JSON.stringify(block.input).length;
+          } else if (block.type === 'tool_result' && block.content) {
+            totalChars += typeof block.content === 'string' ? block.content.length : JSON.stringify(block.content).length;
+          }
+        }
+      }
+    }
+    
+    // Add tool schema overhead (rough estimate: ~100 tokens per tool)
+    const toolOverhead = tools ? tools.length * 100 : 0;
+    
+    // Rough approximation: ~4 characters per token (conservative)
+    const estimatedTokens = Math.ceil(totalChars / 4) + toolOverhead;
+    
+    return estimatedTokens;
+  }
+
+  /**
    * Wait to respect rate limits
    */
-  async waitForRateLimit() {
+  async waitForRateLimit(estimatedTokens = 0) {
     const now = Date.now();
     const timeSinceLastCall = now - this.lastCallTime;
     
@@ -50,10 +84,21 @@ export class AgentRunner {
     // Calculate current token usage in the last minute
     const tokensUsed = this.tokenUsageWindow.reduce((sum, entry) => sum + entry.tokens, 0);
     
-    // If we're close to the limit, wait longer
-    if (tokensUsed > this.maxTokensPerMinute * 0.8) {
-      const waitTime = Math.max(this.minDelayBetweenCalls * 2, 5000);
-      console.log(`Rate limit: ${tokensUsed}/${this.maxTokensPerMinute} tokens used, waiting ${waitTime}ms...`);
+    // If this request would exceed the limit, wait longer
+    const projectedUsage = tokensUsed + estimatedTokens;
+    const usageRatio = tokensUsed / this.maxTokensPerMinute;
+    
+    if (projectedUsage > this.maxTokensPerMinute) {
+      // We would exceed the limit, wait until enough tokens are available
+      const tokensToWaitFor = projectedUsage - this.maxTokensPerMinute * 0.8; // Wait until 80% capacity
+      // Assuming tokens expire at a rate of maxTokensPerMinute per minute
+      const waitTime = Math.ceil((tokensToWaitFor / this.maxTokensPerMinute) * 60000) + 2000; // Add 2s buffer
+      console.log(`Rate limit: ${tokensUsed}/${this.maxTokensPerMinute} tokens used (${Math.round(usageRatio * 100)}%), estimated request: ${estimatedTokens} tokens, waiting ${Math.ceil(waitTime / 1000)}s...`);
+      await this.sleep(Math.min(waitTime, 60000)); // Cap at 60 seconds
+    } else if (usageRatio > 0.7) {
+      // If we're over 70% capacity, use longer delays
+      const waitTime = Math.max(this.minDelayBetweenCalls * 3, 15000);
+      console.log(`Rate limit: ${tokensUsed}/${this.maxTokensPerMinute} tokens used (${Math.round(usageRatio * 100)}%), waiting ${Math.ceil(waitTime / 1000)}s...`);
       await this.sleep(waitTime);
     } else if (timeSinceLastCall < this.minDelayBetweenCalls) {
       const waitTime = this.minDelayBetweenCalls - timeSinceLastCall;
@@ -73,40 +118,70 @@ export class AgentRunner {
   /**
    * Make API call with rate limiting and retry logic
    */
-  async makeApiCall(params, retries = 3) {
+  async makeApiCall(params, retries = 5) {
+    // Estimate tokens before making the call
+    const estimatedTokens = this.estimateTokenCount(params.messages || [], params.tools || []);
+    
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
-        await this.waitForRateLimit();
+        await this.waitForRateLimit(estimatedTokens);
         
         const response = await this.anthropic.messages.create(params);
         
-        // Track token usage
+        // Track token usage (use actual input tokens from response)
         if (response.usage) {
+          const inputTokens = response.usage.input_tokens || 0;
           this.tokenUsageWindow.push({
             time: Date.now(),
-            tokens: response.usage.input_tokens || 0
+            tokens: inputTokens
           });
+          
+          // Reset consecutive rate limit errors on success
+          this.consecutiveRateLimitErrors = 0;
         }
         
         return response;
       } catch (error) {
-        // Check if it's a rate limit error
+        // Check if it's a rate limit error (handle various error formats)
+        const errorMessage = (error.message || error.error?.message || JSON.stringify(error) || '').toLowerCase();
+        const errorType = error.error?.type || error.type;
         const isRateLimitError = error.status === 429 || 
-                                 error.message?.includes('rate_limit') ||
-                                 error.message?.includes('rate limit');
+                                 error.statusCode === 429 ||
+                                 errorType === 'rate_limit_error' ||
+                                 errorMessage.includes('rate_limit') ||
+                                 errorMessage.includes('rate limit') ||
+                                 errorMessage.includes('would exceed the rate limit');
         
-        if (isRateLimitError && attempt < retries - 1) {
-          // Exponential backoff: wait 5s, 10s, 20s
-          const backoffTime = Math.min(5000 * Math.pow(2, attempt), 60000);
-          console.log(`Rate limit hit, retrying in ${backoffTime}ms (attempt ${attempt + 1}/${retries})...`);
-          await this.sleep(backoffTime);
-          continue;
+        if (isRateLimitError) {
+          this.consecutiveRateLimitErrors++;
+          
+          if (attempt < retries - 1) {
+            // More aggressive exponential backoff for rate limits
+            // Start at 30 seconds, then 60, 90, 120 seconds
+            const backoffTime = Math.min(30000 * (attempt + 1), 120000);
+            console.log(`Rate limit hit (${this.consecutiveRateLimitErrors} consecutive), waiting ${Math.ceil(backoffTime / 1000)}s before retry (attempt ${attempt + 1}/${retries})...`);
+            
+            // Also wait for the rate limit window to clear
+            const waitForWindow = 65000; // Wait 65 seconds to ensure a new minute window
+            await this.sleep(Math.max(backoffTime, waitForWindow));
+            
+            // Reset token usage window if we've had multiple consecutive errors
+            if (this.consecutiveRateLimitErrors >= 2) {
+              console.log('Resetting token usage window after consecutive rate limit errors...');
+              this.tokenUsageWindow = [];
+              this.lastCallTime = 0;
+            }
+            
+            continue;
+          }
         }
         
         // If not a rate limit error or out of retries, throw
         throw error;
       }
     }
+    
+    throw new Error('Max retries exceeded');
   }
 
   /**
@@ -184,6 +259,9 @@ export class AgentRunner {
         });
 
         // Get next response with rate limiting
+        // Add extra delay after tool execution to prevent rapid-fire requests
+        await this.sleep(1000); // 1 second delay after tool execution
+        
         response = await this.makeApiCall({
           model: this.model,
           max_tokens: 8000,
@@ -206,17 +284,32 @@ export class AgentRunner {
       };
 
     } catch (error) {
-      console.error(`Error running agent ${agentName}:`, error.message);
-      if (error.status === 429) {
-        console.error('Rate limit exceeded. Consider:');
-        console.error('  1. Running agents individually with delays');
+      const errorMessage = error.message || error.error?.message || 'Unknown error';
+      console.error(`Error running agent ${agentName}:`, errorMessage);
+      
+      // Check if it's a rate limit error
+      const errorType = error.error?.type || error.type;
+      const errorMsgLower = errorMessage.toLowerCase();
+      const isRateLimitError = error.status === 429 || 
+                               error.statusCode === 429 ||
+                               errorType === 'rate_limit_error' ||
+                               errorMsgLower.includes('rate_limit') ||
+                               errorMsgLower.includes('rate limit') ||
+                               errorMsgLower.includes('would exceed the rate limit');
+      
+      if (isRateLimitError) {
+        console.error('Rate limit exceeded. The system will retry with exponential backoff.');
+        console.error('If this persists, consider:');
+        console.error('  1. Running agents individually with longer delays');
         console.error('  2. Reducing the scope of agent instructions');
         console.error('  3. Contacting Anthropic for a rate limit increase');
       }
+      
       return {
         agentName,
         success: false,
-        error: error.message
+        error: errorMessage,
+        errorDetails: isRateLimitError ? 'Rate limit error' : undefined
       };
     }
   }
@@ -331,13 +424,13 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
     const filesystemTools = [
       {
         name: 'read_file_from_manual_sources',
-        description: 'Read a file from the manual_sources folder. Excel files (.xlsx, .xls) will be parsed and all sheet data will be returned as JSON. Text files will return their content. Use this to access ARR data and other files in the manual_sources directory.',
+        description: 'Read a file from the manual_sources folder (including subdirectories like Q4/). Excel files (.xlsx, .xls) will be parsed and all sheet data will be returned as JSON. CSV and text files will return their content. PDF files will be parsed and their text content extracted. Use this to access ARR data, Goodvibes exports, Mixpanel PDFs, and other files in the manual_sources directory.',
         input_schema: {
           type: 'object',
           properties: {
             filename: {
               type: 'string',
-              description: 'The name of the file to read from the manual_sources folder (e.g., "Dec 22-ARR Waterfall OV.xlsx")'
+              description: 'The name of the file to read from the manual_sources folder. Can include subdirectories, e.g., "Q4/Good-Vibes-2025-12-29T14-11-50.csv" or "Q4/ARR Waterfall.xlsx" or "Dec 22-ARR Waterfall OV.xlsx"'
             }
           },
           required: ['filename']
@@ -345,7 +438,7 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
       },
       {
         name: 'list_manual_sources_files',
-        description: 'List all files available in the manual_sources folder. Use this to see what ARR data files are available.',
+        description: 'List all files available in the manual_sources folder and its subdirectories (recursively). Use this to see what ARR data files, Goodvibes exports, Mixpanel PDFs, and other files are available. Returns files with their paths relative to manual_sources.',
         input_schema: {
           type: 'object',
           properties: {},
@@ -372,9 +465,13 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
       }
 
       if (!fs.existsSync(filePath)) {
+        // Try to provide helpful error message with available files
+        const availableFiles = this.listAllFilesRecursive(manualSourcesPath);
         return {
           error: `File not found: ${args.filename}`,
-          availableFiles: fs.readdirSync(manualSourcesPath).join(', ')
+          availableFiles: availableFiles.slice(0, 20).join(', '), // Show first 20 files
+          totalFiles: availableFiles.length,
+          hint: 'Use list_manual_sources_files to see all available files including those in subdirectories like Q4/'
         };
       }
 
@@ -420,11 +517,63 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
         }
       }
 
-      // For text files, read the content
+      // For CSV files, read the content
+      const isCSV = filePath.endsWith('.csv');
+      if (isCSV) {
+        try {
+          const content = fs.readFileSync(filePath, 'utf8');
+          return {
+            file: args.filename,
+            type: 'CSV file',
+            modified: stats.mtime.toISOString(),
+            content: content,
+            size: stats.size,
+            lines: content.split('\n').length
+          };
+        } catch (error) {
+          return {
+            error: `Error reading CSV file: ${error.message}`,
+            file: args.filename
+          };
+        }
+      }
+
+      // For PDF files, parse and return the content
+      const isPDF = filePath.endsWith('.pdf');
+      if (isPDF) {
+        try {
+          const dataBuffer = fs.readFileSync(filePath);
+          const pdfData = await pdfParse(dataBuffer);
+          
+          return {
+            file: args.filename,
+            type: 'PDF file',
+            modified: stats.mtime.toISOString(),
+            size: stats.size,
+            pages: pdfData.numpages,
+            text: pdfData.text,
+            info: pdfData.info || {},
+            metadata: pdfData.metadata || {},
+            summary: `PDF file parsed successfully. ${pdfData.numpages} page(s). ${pdfData.text.length} characters of text extracted.`
+          };
+        } catch (error) {
+          return {
+            file: args.filename,
+            type: 'PDF file',
+            error: `Error parsing PDF file: ${error.message}`,
+            modified: stats.mtime.toISOString(),
+            size: stats.size
+          };
+        }
+      }
+
+      // For other text files, read the content
       try {
         const content = fs.readFileSync(filePath, 'utf8');
         return {
           file: args.filename,
+          type: 'Text file',
+          modified: stats.mtime.toISOString(),
           content: content
         };
       } catch (error) {
@@ -445,25 +594,78 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
         };
       }
 
-      const files = fs.readdirSync(manualSourcesPath);
-      const fileDetails = files.map(file => {
-        const filePath = path.join(manualSourcesPath, file);
+      // Recursively list all files
+      const allFiles = this.listAllFilesRecursive(manualSourcesPath);
+      const fileDetails = allFiles.map(relativePath => {
+        const filePath = path.join(manualSourcesPath, relativePath);
         const stats = fs.statSync(filePath);
         return {
-          name: file,
+          name: relativePath, // Include subdirectory path
           size: stats.size,
           modified: stats.mtime.toISOString(),
-          type: path.extname(file) || 'unknown'
+          type: path.extname(relativePath) || 'unknown',
+          isDirectory: false
         };
       });
 
+      // Also list directories for context
+      const directories = this.listAllDirectoriesRecursive(manualSourcesPath);
+      const dirDetails = directories.map(relativePath => ({
+        name: relativePath + '/',
+        isDirectory: true
+      }));
+
       return {
         folder: 'manual_sources',
+        directories: dirDetails,
         files: fileDetails,
-        count: files.length
+        totalFiles: fileDetails.length,
+        totalDirectories: dirDetails.length
       };
     }
 
     throw new Error(`Unknown custom tool: ${toolName}`);
+  }
+
+  /**
+   * Recursively list all files in a directory
+   */
+  listAllFilesRecursive(dirPath, basePath = '') {
+    const files = [];
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
+      const relativePath = basePath ? path.join(basePath, entry.name) : entry.name;
+
+      if (entry.isDirectory()) {
+        // Recursively list files in subdirectories
+        files.push(...this.listAllFilesRecursive(fullPath, relativePath));
+      } else {
+        files.push(relativePath);
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * Recursively list all directories in a directory
+   */
+  listAllDirectoriesRecursive(dirPath, basePath = '') {
+    const directories = [];
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        const relativePath = basePath ? path.join(basePath, entry.name) : entry.name;
+        directories.push(relativePath);
+        // Recursively list subdirectories
+        const fullPath = path.join(dirPath, entry.name);
+        directories.push(...this.listAllDirectoriesRecursive(fullPath, relativePath));
+      }
+    }
+
+    return directories;
   }
 }

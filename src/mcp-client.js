@@ -12,6 +12,10 @@ export class MCPClientManager {
   constructor() {
     this.clients = new Map();
     this.tools = new Map();
+    // Configurable timeout settings (in milliseconds)
+    this.connectionTimeout = parseInt(process.env.MCP_CONNECTION_TIMEOUT || '30000', 10); // 30 seconds default
+    this.maxRetries = parseInt(process.env.MCP_MAX_RETRIES || '3', 10); // 3 retries default
+    this.retryDelay = parseInt(process.env.MCP_RETRY_DELAY || '2000', 10); // 2 seconds initial delay
   }
 
   /**
@@ -31,27 +35,93 @@ export class MCPClientManager {
   }
 
   /**
+   * Sleep utility for retry delays
+   */
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Wrapper to add timeout to a promise
+   */
+  async withTimeout(promise, timeoutMs, operationName) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(`Operation "${operationName}" timed out after ${timeoutMs}ms`)), timeoutMs)
+      )
+    ]);
+  }
+
+  /**
    * Initialize connections to all configured MCP servers
+   * Uses parallel connections with timeout and retry logic
    */
   async initialize() {
     const mcpServers = this.loadMCPConfig();
 
     console.log(`Found ${Object.keys(mcpServers).length} MCP servers in config`);
+    console.log(`Connection timeout: ${this.connectionTimeout}ms, Max retries: ${this.maxRetries}`);
 
-    for (const [serverName, serverConfig] of Object.entries(mcpServers)) {
-      try {
-        await this.connectToServer(serverName, serverConfig);
-      } catch (error) {
-        console.error(`Failed to connect to MCP server ${serverName}:`, error.message);
-      }
+    // Connect to all servers in parallel with timeout and retry handling
+    const connectionPromises = Object.entries(mcpServers).map(([serverName, serverConfig]) =>
+      this.connectToServerWithRetry(serverName, serverConfig)
+    );
+
+    // Use allSettled to wait for all connections (successful or failed)
+    const results = await Promise.allSettled(connectionPromises);
+
+    // Log results
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+
+    console.log(`\nConnection Summary:`);
+    console.log(`  ✓ Successfully connected: ${successful}/${Object.keys(mcpServers).length}`);
+    if (failed > 0) {
+      console.log(`  ✗ Failed connections: ${failed}/${Object.keys(mcpServers).length}`);
+      // Log details of failed connections
+      const serverNames = Object.keys(mcpServers);
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          const serverName = serverNames[index];
+          console.error(`    - ${serverName}: ${result.reason?.message || result.reason || 'Unknown error'}`);
+        }
+      });
     }
-
-    console.log(`Successfully connected to ${this.clients.size} MCP servers`);
+    console.log(`\nTotal MCP servers connected: ${this.clients.size}`);
     console.log(`Available tools: ${Array.from(this.tools.keys()).join(', ')}`);
   }
 
   /**
-   * Connect to a single MCP server
+   * Connect to a server with retry logic and exponential backoff
+   */
+  async connectToServerWithRetry(serverName, serverConfig) {
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          const delay = this.retryDelay * Math.pow(2, attempt - 2); // Exponential backoff
+          console.log(`  Retrying ${serverName} (attempt ${attempt}/${this.maxRetries}) after ${delay}ms...`);
+          await this.sleep(delay);
+        }
+        
+        await this.connectToServer(serverName, serverConfig);
+        return; // Success, exit retry loop
+      } catch (error) {
+        lastError = error;
+        if (attempt < this.maxRetries) {
+          console.warn(`  Attempt ${attempt} failed for ${serverName}: ${error.message}`);
+        }
+      }
+    }
+    
+    // All retries exhausted
+    throw new Error(`Failed to connect to ${serverName} after ${this.maxRetries} attempts: ${lastError?.message || 'Unknown error'}`);
+  }
+
+  /**
+   * Connect to a single MCP server with timeout handling
    */
   async connectToServer(serverName, serverConfig) {
     const { command, args = [], env = {} } = serverConfig;
@@ -69,16 +139,45 @@ export class MCPClientManager {
       capabilities: {}
     });
 
-    await client.connect(transport);
+    // Connect with timeout
+    try {
+      await this.withTimeout(
+        client.connect(transport),
+        this.connectionTimeout,
+        `connect to ${serverName}`
+      );
+    } catch (error) {
+      // Clean up transport if connection failed
+      try {
+        await transport.close();
+      } catch (closeError) {
+        // Ignore close errors
+      }
+      throw new Error(`MCP error -32001: Request timed out - ${error.message}`);
+    }
+
     this.clients.set(serverName, client);
 
-    // Load available tools from this server
-    const toolsList = await client.listTools();
+    // Load available tools from this server with timeout
+    let toolsList;
+    try {
+      toolsList = await this.withTimeout(
+        client.listTools(),
+        this.connectionTimeout,
+        `list tools from ${serverName}`
+      );
+    } catch (error) {
+      // If listing tools fails, remove the client but don't throw
+      // (connection succeeded but tool listing failed)
+      this.clients.delete(serverName);
+      throw new Error(`MCP error -32001: Request timed out - Failed to list tools: ${error.message}`);
+    }
+
     toolsList.tools.forEach(tool => {
       this.tools.set(tool.name, { serverName, client, schema: tool });
     });
 
-    console.log(`Connected to ${serverName}: ${toolsList.tools.length} tools available`);
+    console.log(`  ✓ Connected to ${serverName}: ${toolsList.tools.length} tools available`);
   }
 
   /**

@@ -48,9 +48,19 @@ npm install
    ANTHROPIC_API_KEY=sk-ant-your-key-here
    CLAUDE_MODEL=claude-sonnet-4-5-20250929
    MCP_CONFIG_PATH=/Users/yourusername/Library/Application Support/Claude/claude_desktop_config.json
+   
+   # Optional: MCP connection settings (defaults shown)
+   MCP_CONNECTION_TIMEOUT=30000    # Connection timeout in milliseconds (default: 30000 = 30s)
+   MCP_MAX_RETRIES=3                # Maximum retry attempts per server (default: 3)
+   MCP_RETRY_DELAY=2000             # Initial retry delay in milliseconds (default: 2000 = 2s)
    ```
 
    Note: Replace `/Users/yourusername/` with your actual username
+   
+   **MCP Connection Settings**: If you experience timeout issues with MCP servers, you can increase these values:
+   - `MCP_CONNECTION_TIMEOUT`: Increase if servers take longer to start (e.g., 60000 for 60 seconds)
+   - `MCP_MAX_RETRIES`: Increase if you want more retry attempts (e.g., 5)
+   - `MCP_RETRY_DELAY`: Adjust the delay between retries (uses exponential backoff)
 
 ## Step 5: Configure Application Settings
 

@@ -76,6 +76,11 @@ You'll need MCP servers configured in Claude Desktop for:
    ANTHROPIC_API_KEY=your_api_key_here
    CLAUDE_MODEL=claude-sonnet-4-5-20250929
    MCP_CONFIG_PATH=/Users/yourusername/Library/Application Support/Claude/claude_desktop_config.json
+   
+   # Optional: MCP connection settings (defaults shown)
+   MCP_CONNECTION_TIMEOUT=30000    # Connection timeout in milliseconds (default: 30000 = 30s)
+   MCP_MAX_RETRIES=3                # Maximum retry attempts per server (default: 3)
+   MCP_RETRY_DELAY=2000             # Initial retry delay in milliseconds (default: 2000 = 2s)
    ```
 
 5. **Configure your config.json**:
@@ -262,6 +267,16 @@ To run this weekly automatically, set up a cron job or scheduled task:
 - Ensure the required MCP server is configured in Claude Desktop
 - Verify the MCP server is running correctly
 - Check MCP server names in Claude Desktop config
+
+### "MCP error -32001: Request timed out"
+- This indicates an MCP server connection timeout
+- The system now automatically retries failed connections (default: 3 attempts)
+- Connections are made in parallel to reduce startup time
+- To fix persistent timeouts:
+  - Increase `MCP_CONNECTION_TIMEOUT` in `.env` (e.g., `60000` for 60 seconds)
+  - Increase `MCP_MAX_RETRIES` in `.env` (e.g., `5` for more retry attempts)
+  - Check if the MCP server process is slow to start or has dependencies
+  - Verify the MCP server command in Claude Desktop config is correct
 
 ### Agent failures
 - Check that all required MCP servers are configured

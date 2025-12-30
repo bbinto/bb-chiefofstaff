@@ -25,6 +25,7 @@ class ChiefOfStaffAgent {
       'business-health',
       'product-engineering',
       'okr-progress',
+      'quarterly-review',
       'thoughtleadership-updates'
     ];
   }
@@ -115,8 +116,8 @@ class ChiefOfStaffAgent {
         
         // Add delay between agents (except after the last one) to help with rate limits
         if (i < this.agents.length - 1) {
-          console.log('Waiting 3 seconds before next agent...\n');
-          await this.sleep(3000);
+          console.log('Waiting 10 seconds before next agent...\n');
+          await this.sleep(10000); // Increased to 10 seconds for better rate limit management
         }
       } catch (error) {
         console.error(`Error executing ${agentName}:`, error.message);
@@ -198,7 +199,7 @@ class ChiefOfStaffAgent {
     console.log('GENERATING REPORT');
     console.log('='.repeat(80) + '\n');
 
-    const reportPath = this.reportGenerator.generateReport(results);
+    const reportPath = await this.reportGenerator.generateReport(results);
     const summary = this.reportGenerator.generateSummary(results);
 
     console.log(summary);
@@ -258,28 +259,31 @@ Chief of Staff Agent System
 
 Usage:
   npm start                                          Run all agents
-  npm start agent1 agent2                            Run specific agents
+  npm start -- agent1 agent2                        Run specific agents
   npm start -- --start-date YYYY-MM-DD --end-date YYYY-MM-DD   Run with custom date range
-  npm start agent1 agent2 --start-date YYYY-MM-DD --end-date YYYY-MM-DD
+  npm start -- agent1 agent2 --start-date YYYY-MM-DD --end-date YYYY-MM-DD
   npm start -- --list                                List available agents
   npm start -- --help                                Show this help
 
 Options:
   --start-date YYYY-MM-DD    Start date for data analysis (default: configured days ago, see config.json settings.defaultDays)
   --end-date YYYY-MM-DD      End date for data analysis (default: today)
+  
+Note: When using npm, you MUST use '--' before any arguments
 
 Available Agents:
   - weekly-recap              Weekly team catch-up and recap
   - business-health           Officevibe business and product health
   - product-engineering       Product development and engineering updates
   - okr-progress             OKR updates and progress tracking
+  - quarterly-review         Quarterly review of product releases and OKR updates
   - thoughtleadership-updates Product thought leadership and new topics
 
 Examples:
   npm start
-  npm start weekly-recap business-health
-  npm start --start-date 2025-12-20 --end-date 2025-12-27
-  npm start weekly-recap --start-date 2025-12-20 --end-date 2025-12-27
+  npm start -- weekly-recap business-health
+  npm start -- --start-date 2025-12-20 --end-date 2025-12-27
+  npm start -- weekly-recap --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- --list
 `);
   process.exit(0);
@@ -367,6 +371,12 @@ function extractAgentNames(args) {
 
 const dateRange = parseDateRange(args);
 const specificAgents = extractAgentNames(args);
+
+// Always log parsed arguments for debugging
+console.log(`[CLI] Parsed arguments:`);
+console.log(`  - Date range: ${dateRange ? `${dateRange.startDate || 'default'} to ${dateRange.endDate || 'default'}` : 'default'}`);
+console.log(`  - Specific agents: ${specificAgents ? specificAgents.join(', ') : 'all agents'}`);
+console.log(`  - Raw args: ${args.join(' ')}`);
 
 const agent = new ChiefOfStaffAgent(dateRange);
 
