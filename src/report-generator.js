@@ -37,16 +37,21 @@ export class ReportGenerator {
 
     report += this.buildReportFooter();
 
+    // Determine report name based on number of agents
+    const reportName = agentResults.length === 1 
+      ? agentResults[0].agentName 
+      : 'weekly-report';
+
     // Save report as markdown
     console.log('[ReportGenerator] Generating Markdown...');
-    return this.saveAsMarkdown(report, dateStr, timeStr);
+    return this.saveAsMarkdown(report, dateStr, timeStr, reportName);
   }
 
   /**
    * Save report as Markdown
    */
-  saveAsMarkdown(report, dateStr, timeStr) {
-    const filename = `weekly-report-${dateStr}-${timeStr}.md`;
+  saveAsMarkdown(report, dateStr, timeStr, reportName = 'weekly-report') {
+    const filename = `${reportName}-${dateStr}-${timeStr}.md`;
     const filepath = path.join(this.reportDir, filename);
     fs.writeFileSync(filepath, report, 'utf8');
     console.log(`\nReport saved to: ${filepath}`);

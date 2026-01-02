@@ -12,21 +12,26 @@ import { ReportGenerator } from './report-generator.js';
  * Orchestrates multiple specialized agents to provide weekly product director insights
  */
 class ChiefOfStaffAgent {
-  constructor(dateRange = null) {
+  constructor(dateRange = null, agentParams = {}) {
     this.mcpClient = null;
     this.config = null;
     this.agentRunner = null;
     this.reportGenerator = new ReportGenerator();
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
+    this.agentParams = agentParams; // { slackUserId: 'U...' } for slack-user-analysis
 
     // Define agent execution order
     this.agents = [
       'weekly-recap',
       'business-health',
       'product-engineering',
+      'jira-tracker',
       'okr-progress',
+      'productivity-weekly-tracker',
       'quarterly-review',
-      'thoughtleadership-updates'
+      'thoughtleadership-updates',
+      'officevibe-strategy-roadmap',
+      'slack-user-analysis'
     ];
   }
 
@@ -80,7 +85,7 @@ class ChiefOfStaffAgent {
     await this.mcpClient.initialize();
 
     // Initialize agent runner
-    this.agentRunner = new AgentRunner(this.mcpClient, this.config, this.dateRange);
+    this.agentRunner = new AgentRunner(this.mcpClient, this.config, this.dateRange, this.agentParams);
 
     console.log('\nInitialization complete!\n');
   }
@@ -268,6 +273,7 @@ Usage:
 Options:
   --start-date YYYY-MM-DD    Start date for data analysis (default: configured days ago, see config.json settings.defaultDays)
   --end-date YYYY-MM-DD      End date for data analysis (default: today)
+  --slack-user-id USER_ID    Slack user ID for slack-user-analysis agent (required when running slack-user-analysis)
   
 Note: When using npm, you MUST use '--' before any arguments
 
@@ -278,12 +284,14 @@ Available Agents:
   - okr-progress             OKR updates and progress tracking
   - quarterly-review         Quarterly review of product releases and OKR updates
   - thoughtleadership-updates Product thought leadership and new topics
+  - slack-user-analysis      Analyze a Slack user's contributions and communication patterns
 
 Examples:
   npm start
   npm start -- weekly-recap business-health
   npm start -- --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- weekly-recap --start-date 2025-12-20 --end-date 2025-12-27
+  npm start -- slack-user-analysis --slack-user-id U01234567AB
   npm start -- --list
 `);
   process.exit(0);
@@ -344,7 +352,23 @@ function parseDateRange(args) {
   return null;
 }
 
-// Remove date arguments from args array to get agent names
+// Parse agent parameters (like --slack-user-id)
+function parseAgentParams(args) {
+  const params = {};
+  const slackUserIdIndex = args.indexOf('--slack-user-id');
+  
+  if (slackUserIdIndex !== -1 && args[slackUserIdIndex + 1]) {
+    params.slackUserId = args[slackUserIdIndex + 1];
+    // Validate format (should start with U and be alphanumeric)
+    if (!/^U[A-Z0-9]+$/i.test(params.slackUserId)) {
+      console.warn(`Warning: Slack user ID "${params.slackUserId}" doesn't match expected format (should be like U01234567AB)`);
+    }
+  }
+  
+  return params;
+}
+
+// Remove date and parameter arguments from args array to get agent names
 function extractAgentNames(args) {
   const agentNames = [];
   let skipNext = false;
@@ -355,7 +379,7 @@ function extractAgentNames(args) {
       continue;
     }
     
-    if (args[i] === '--start-date' || args[i] === '--end-date') {
+    if (args[i] === '--start-date' || args[i] === '--end-date' || args[i] === '--slack-user-id') {
       skipNext = true;
       continue;
     }
@@ -370,15 +394,25 @@ function extractAgentNames(args) {
 }
 
 const dateRange = parseDateRange(args);
+const agentParams = parseAgentParams(args);
 const specificAgents = extractAgentNames(args);
 
 // Always log parsed arguments for debugging
 console.log(`[CLI] Parsed arguments:`);
 console.log(`  - Date range: ${dateRange ? `${dateRange.startDate || 'default'} to ${dateRange.endDate || 'default'}` : 'default'}`);
 console.log(`  - Specific agents: ${specificAgents ? specificAgents.join(', ') : 'all agents'}`);
+if (Object.keys(agentParams).length > 0) {
+  console.log(`  - Agent parameters: ${JSON.stringify(agentParams)}`);
+}
 console.log(`  - Raw args: ${args.join(' ')}`);
 
-const agent = new ChiefOfStaffAgent(dateRange);
+// Warn if slack-user-analysis is run without slack-user-id
+if (specificAgents && specificAgents.includes('slack-user-analysis') && !agentParams.slackUserId) {
+  console.warn(`\n⚠️  Warning: slack-user-analysis requires --slack-user-id parameter.`);
+  console.warn(`   Example: npm start -- slack-user-analysis --slack-user-id U01234567AB\n`);
+}
+
+const agent = new ChiefOfStaffAgent(dateRange, agentParams);
 
 if (args.includes('--list') || args.includes('-l')) {
   agent.listAgents();

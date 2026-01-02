@@ -9,10 +9,11 @@ import pdfParse from 'pdf-parse';
  * Executes individual agents based on their markdown instructions
  */
 export class AgentRunner {
-  constructor(mcpClient, config, dateRange = null) {
+  constructor(mcpClient, config, dateRange = null, agentParams = {}) {
     this.mcpClient = mcpClient;
     this.config = config;
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
+    this.agentParams = agentParams; // { slackUserId: 'U...' } for slack-user-analysis
     this.anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY
     });
@@ -68,6 +69,54 @@ export class AgentRunner {
     const estimatedTokens = Math.ceil(totalChars / 4) + toolOverhead;
     
     return estimatedTokens;
+  }
+
+  /**
+   * Truncate messages to stay under token limit
+   * Keeps the initial user message (instructions) and recent tool interactions
+   */
+  truncateMessages(messages, maxTokens = 180000, tools = []) {
+    // Always keep the first message (instructions)
+    if (messages.length <= 1) {
+      return messages;
+    }
+
+    const firstMessage = messages[0];
+    const recentMessages = [];
+    
+    // Start from the end and work backwards, keeping recent messages
+    // until we approach the limit
+    const baseTokens = this.estimateTokenCount([firstMessage], tools);
+    
+    // Keep at least the last few messages (recent tool interactions)
+    const minRecentMessages = 4; // Keep at least last 4 messages (2 tool interaction pairs)
+    let messagesKept = 0;
+    
+    for (let i = messages.length - 1; i >= 1; i--) {
+      // Test if adding this message would exceed limit
+      const testMessages = [firstMessage, ...recentMessages, messages[i]];
+      const testTokens = this.estimateTokenCount(testMessages, tools);
+      
+      // If adding this message would exceed limit and we've kept minimum, stop
+      if (testTokens > maxTokens && messagesKept >= minRecentMessages) {
+        break;
+      }
+      
+      // Add this message to recent messages (at the beginning since we're going backwards)
+      recentMessages.unshift(messages[i]);
+      messagesKept++;
+    }
+    
+    const truncated = [firstMessage, ...recentMessages];
+    const finalTokens = this.estimateTokenCount(truncated, tools);
+    
+    if (messages.length > truncated.length) {
+      const removed = messages.length - truncated.length;
+      console.log(`⚠️  Message truncation: Removed ${removed} old message(s), kept ${truncated.length}/${messages.length} messages`);
+      console.log(`   Token count: ${Math.round(finalTokens/1000)}k (limit: ${Math.round(maxTokens/1000)}k)`);
+    }
+    
+    return truncated;
   }
 
   /**
@@ -152,6 +201,34 @@ export class AgentRunner {
                                  errorMessage.includes('rate limit') ||
                                  errorMessage.includes('would exceed the rate limit');
         
+        // Check if it's a "prompt too long" error
+        const isPromptTooLong = error.status === 400 &&
+                                (errorType === 'invalid_request_error' ||
+                                 errorMessage.includes('prompt is too long') ||
+                                 errorMessage.includes('too long') ||
+                                 errorMessage.includes('maximum'));
+        
+        if (isPromptTooLong) {
+          console.error(`❌ Prompt too long error: ${error.error?.message || errorMessage}`);
+          console.error('This indicates the conversation history has exceeded the token limit.');
+          console.error('The system will attempt to truncate messages and retry...');
+          
+          if (attempt < retries - 1) {
+            // Truncate messages more aggressively
+            if (params.messages) {
+              const truncated = this.truncateMessages(params.messages, 150000, params.tools); // More aggressive truncation
+              // Replace the messages array contents (preserve reference for caller)
+              params.messages.length = 0;
+              params.messages.push(...truncated);
+              console.log(`Retrying with truncated messages (${params.messages.length} messages)...`);
+              continue;
+            }
+          }
+          
+          // If we can't truncate or out of retries, throw with helpful message
+          throw new Error(`Prompt too long (exceeds 200k token limit). Try running the agent with fewer data sources or split the work into smaller tasks.`);
+        }
+        
         if (isRateLimitError) {
           this.consecutiveRateLimitErrors++;
           
@@ -197,10 +274,20 @@ export class AgentRunner {
     // Prepare context with configuration
     const contextMessage = this.buildContextMessage();
 
+    // Build parameter message for agents that need it
+    let parameterMessage = '';
+    if (agentName === 'slack-user-analysis') {
+      if (this.agentParams.slackUserId) {
+        parameterMessage = `\n\n**IMPORTANT: Slack User ID Parameter**\nThe Slack user ID to analyze is: ${this.agentParams.slackUserId}\nPlease use this user ID to search for their messages and analyze their contributions.`;
+      } else {
+        parameterMessage = `\n\n**IMPORTANT: Slack User ID Parameter Required**\nNo Slack user ID was provided. Please ask the user for the Slack user ID before proceeding with the analysis. The Slack user ID format is typically "U" followed by alphanumeric characters (e.g., "U01234567AB").`;
+      }
+    }
+
     const messages = [
       {
         role: 'user',
-        content: `${contextMessage}\n\n${instructions}\n\nPlease execute the agent's instructions now. Use the available MCP tools to gather the required data and provide a comprehensive report following the output format specified in the instructions.`
+        content: `${contextMessage}\n\n${instructions}${parameterMessage}\n\nPlease execute the agent's instructions now. Use the available MCP tools to gather the required data and provide a comprehensive report following the output format specified in the instructions.`
       }
     ];
 
@@ -262,6 +349,15 @@ export class AgentRunner {
         // Add extra delay after tool execution to prevent rapid-fire requests
         await this.sleep(1000); // 1 second delay after tool execution
         
+        // Check token count and truncate if needed (keep under 180k to leave buffer)
+        const estimatedTokens = this.estimateTokenCount(messages, tools);
+        const maxPromptTokens = 180000; // Leave 20k buffer below 200k limit
+        
+        if (estimatedTokens > maxPromptTokens) {
+          console.log(`⚠️  Token count (${Math.round(estimatedTokens/1000)}k) exceeds limit, truncating messages...`);
+          messages = this.truncateMessages(messages, maxPromptTokens, tools);
+        }
+        
         response = await this.makeApiCall({
           model: this.model,
           max_tokens: 8000,
@@ -297,7 +393,22 @@ export class AgentRunner {
                                errorMsgLower.includes('rate limit') ||
                                errorMsgLower.includes('would exceed the rate limit');
       
-      if (isRateLimitError) {
+      // Check if it's a "prompt too long" error
+      const isPromptTooLong = error.status === 400 &&
+                              (errorType === 'invalid_request_error' ||
+                               errorMsgLower.includes('prompt is too long') ||
+                               errorMsgLower.includes('too long') ||
+                               errorMsgLower.includes('maximum'));
+      
+      if (isPromptTooLong) {
+        console.error('❌ Prompt too long error: The conversation history exceeded the 200k token limit.');
+        console.error('This can happen when an agent processes many large data sources.');
+        console.error('Suggestions:');
+        console.error('  1. The system will automatically truncate messages on retry');
+        console.error('  2. Consider splitting the agent work into smaller tasks');
+        console.error('  3. Reduce the number of data sources processed at once');
+        console.error('  4. For officevibe-strategy-roadmap: process feedback pages in batches');
+      } else if (isRateLimitError) {
         console.error('Rate limit exceeded. The system will retry with exponential backoff.');
         console.error('If this persists, consider:');
         console.error('  1. Running agents individually with longer delays');

@@ -17,6 +17,7 @@ reports/
 # Manual sources
 manual_sources/*
 BLOGPOST.md
+mcp-server-list-unused.json
 
 
 # Logs
