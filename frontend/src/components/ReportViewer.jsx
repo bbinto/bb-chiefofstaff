@@ -68,15 +68,15 @@ function ReportViewer({ report, onBack }) {
   return (
     <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-xl border-2 border-indigo-100">
       {/* Header */}
-      <div className="border-b-2 border-indigo-100 bg-gradient-to-r from-indigo-50 to-purple-50 px-6 py-5">
+      <div className="border-b-2 border-indigo-100 bg-gradient-to-r from-indigo-50 to-purple-50 px-5 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
               onClick={onBack}
-              className="flex items-center gap-2 px-4 py-2 text-indigo-700 hover:text-indigo-900 hover:bg-white rounded-lg transition-all duration-200 font-medium border border-indigo-200 hover:border-indigo-300 hover:shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-indigo-700 hover:text-indigo-900 hover:bg-white rounded-lg transition-all duration-200 font-medium border border-indigo-200 hover:border-indigo-300 hover:shadow-sm text-sm"
             >
               <svg
-                className="w-5 h-5"
+                className="w-4 h-4"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -92,33 +92,33 @@ function ReportViewer({ report, onBack }) {
             </button>
           </div>
           <div className="flex items-center gap-3">
-            <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-xs font-bold bg-gradient-to-r ${getAgentColor(report.agentName)} text-white shadow-sm`}>
+            <span className={`inline-flex items-center px-3 py-1 rounded-full text-[0.625rem] font-bold bg-gradient-to-r ${getAgentColor(report.agentName)} text-white shadow-sm`}>
               {formatAgentName(report.agentName)}
             </span>
-            <span className="text-sm text-indigo-600 font-medium">
+            <span className="text-xs text-indigo-600 font-medium">
               {report.date} at {report.time}
             </span>
           </div>
         </div>
-        <h2 className="text-2xl font-bold text-gray-900 mt-4 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+        <h2 className="text-lg font-bold text-gray-900 mt-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
           {report.filename}
         </h2>
       </div>
 
       {/* Content */}
-      <div className="px-8 py-8 bg-gradient-to-br from-white to-indigo-50/30">
-        <div className="prose prose-lg max-w-none prose-headings:text-gray-900 prose-headings:font-bold prose-p:text-gray-700 prose-a:text-indigo-600 prose-a:font-medium hover:prose-a:text-indigo-800">
+      <div className="px-6 py-6 bg-gradient-to-br from-white to-indigo-50/30">
+        <div className="prose prose-sm max-w-none prose-headings:font-bold prose-p:text-gray-700 prose-a:text-indigo-600 prose-a:font-medium hover:prose-a:text-indigo-800">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
               // Custom styling for code blocks
               code: ({ node, inline, className, children, ...props }) => {
                 return inline ? (
-                  <code className="bg-gray-100 px-1.5 py-0.5 rounded text-sm" {...props}>
+                  <code className="bg-gray-100 px-1 py-0.5 rounded text-xs" {...props}>
                     {children}
                   </code>
                 ) : (
-                  <code className="block bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto" {...props}>
+                  <code className="block bg-gray-900 text-gray-100 p-3 rounded-lg overflow-x-auto text-xs" {...props}>
                     {children}
                   </code>
                 )
@@ -138,12 +138,12 @@ function ReportViewer({ report, onBack }) {
                 <tbody className="bg-white divide-y divide-gray-200">{children}</tbody>
               ),
               th: ({ children }) => (
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider border-b border-gray-300">
+                <th className="px-3 py-2 text-left text-xs font-medium text-gray-700 uppercase tracking-wider border-b border-gray-300">
                   {children}
                 </th>
               ),
               td: ({ children }) => (
-                <td className="px-4 py-3 text-sm text-gray-900 border-b border-gray-200">
+                <td className="px-3 py-2 text-xs text-gray-900 border-b border-gray-200">
                   {children}
                 </td>
               ),

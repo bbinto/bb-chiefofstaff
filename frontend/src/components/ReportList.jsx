@@ -7,7 +7,7 @@ function ReportList({ reports, onReportSelect }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
           </svg>
         </div>
-        <p className="text-indigo-600 font-medium text-lg">No reports found</p>
+        <p className="text-indigo-600 font-medium text-sm">No reports found</p>
       </div>
     )
   }
@@ -34,39 +34,23 @@ function ReportList({ reports, onReportSelect }) {
         <div
           key={report.id}
           onClick={() => onReportSelect(report)}
-          className="bg-white/90 backdrop-blur-sm rounded-xl shadow-md border-2 border-indigo-100 p-6 hover:shadow-xl hover:border-indigo-300 hover:scale-[1.02] cursor-pointer transition-all duration-300 group"
+          className="bg-white/90 backdrop-blur-sm rounded-xl shadow-md border-2 border-indigo-100 p-4 hover:shadow-xl hover:border-indigo-300 hover:scale-[1.02] cursor-pointer transition-all duration-300 group"
         >
           <div className="flex items-start justify-between">
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-3">
-                <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-xs font-bold bg-gradient-to-r ${getAgentColor(report.agentName)} text-white shadow-sm`}>
+                <span className={`inline-flex items-center px-3 py-1 rounded-full text-[0.625rem] font-bold bg-gradient-to-r ${getAgentColor(report.agentName)} text-white shadow-sm`}>
                   {formatAgentName(report.agentName)}
                 </span>
-                <span className="text-sm text-indigo-600 font-medium">
+                <span className="text-xs text-indigo-600 font-medium">
                   {report.date} at {report.time}
                 </span>
               </div>
-              {report.insights && report.insights.length > 0 ? (
-                <div className="mb-2">
-                  {report.insights.map((insight, idx) => (
-                    <p key={idx} className="text-sm text-gray-700 mb-1 leading-relaxed">
-                      {insight}
-                    </p>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-gray-600 mb-2">
-                  {report.filename}
-                </p>
-              )}
-              <p className="text-xs text-gray-500">
-                Generated on {new Date(report.timestamp).toLocaleString()}
-              </p>
             </div>
-            <div className="ml-4 flex items-center">
-              <div className="bg-indigo-100 group-hover:bg-indigo-200 rounded-full p-2 transition-colors">
+              <div className="ml-4 flex items-center">
+              <div className="bg-indigo-100 group-hover:bg-indigo-200 rounded-full p-1.5 transition-colors">
                 <svg
-                  className="w-6 h-6 text-indigo-600 group-hover:text-indigo-700 group-hover:translate-x-1 transition-all"
+                  className="w-5 h-5 text-indigo-600 group-hover:text-indigo-700 group-hover:translate-x-1 transition-all"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"

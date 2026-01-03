@@ -72,3 +72,9 @@ npm run build
 
 The built files will be in the `dist/` folder.
 
+
+
+## Screenshots
+
+![List](src/img/mari-cos-list.png)
+![Details](src/img/mari-cos-detail.png)
