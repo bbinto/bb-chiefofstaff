@@ -76,5 +76,9 @@ The built files will be in the `dist/` folder.
 
 ## Screenshots
 
+For now, it's looking at the reports folder and cateogrizing and listing out all reports it can find:
 ![List](src/img/mari-cos-list.png)
+
+Here is an example report - I "red-out" company details.
+
 ![Details](src/img/mari-cos-detail.png)
