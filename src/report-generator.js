@@ -87,11 +87,20 @@ export class ReportGenerator {
 `;
     }
 
+    // Build metadata section
+    let metadata = '';
+    if (result.manualSourcesFolder) {
+      metadata += `**Manual Sources Folder**: ${result.manualSourcesFolder}\n`;
+    }
+    if (result.usage) {
+      metadata += `**Token Usage**: ${result.usage.input_tokens} input, ${result.usage.output_tokens} output\n`;
+    }
+    
+    const metadataSection = metadata ? `${metadata}\n` : '';
+
     return `## ${title}
 
-${result.output}
-
-${result.usage ? `**Token Usage**: ${result.usage.input_tokens} input, ${result.usage.output_tokens} output\n` : ''}
+${metadataSection}${result.output}
 
 ---
 

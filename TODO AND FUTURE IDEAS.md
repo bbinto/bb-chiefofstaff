@@ -10,6 +10,8 @@
     - Pick up scheduled reports output
     - Send to manual_sources folder
 - Send final report back to Slack/email, and/or PDF
+- Build front-end
+    - add visuals, e.g. reporting charts
 
 
 ### Additional Sources

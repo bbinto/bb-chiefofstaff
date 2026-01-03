@@ -271,9 +271,10 @@ Usage:
   npm start -- --help                                Show this help
 
 Options:
-  --start-date YYYY-MM-DD    Start date for data analysis (default: configured days ago, see config.json settings.defaultDays)
-  --end-date YYYY-MM-DD      End date for data analysis (default: today)
-  --slack-user-id USER_ID    Slack user ID for slack-user-analysis agent (required when running slack-user-analysis)
+  --start-date YYYY-MM-DD           Start date for data analysis (default: configured days ago, see config.json settings.defaultDays)
+  --end-date YYYY-MM-DD             End date for data analysis (default: today)
+  --slack-user-id USER_ID           Slack user ID for slack-user-analysis agent (required when running slack-user-analysis)
+  --manual-sources-folder FOLDER    Folder within manual_sources to use for business-health agent (e.g., "Week 1", "Week 2", "planning")
   
 Note: When using npm, you MUST use '--' before any arguments
 
@@ -292,6 +293,8 @@ Examples:
   npm start -- --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- weekly-recap --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- slack-user-analysis --slack-user-id U01234567AB
+  npm start -- business-health --manual-sources-folder "Week 1"
+  npm start -- business-health --manual-sources-folder "Week 2" --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- --list
 `);
   process.exit(0);
@@ -352,10 +355,11 @@ function parseDateRange(args) {
   return null;
 }
 
-// Parse agent parameters (like --slack-user-id)
+// Parse agent parameters (like --slack-user-id, --manual-sources-folder)
 function parseAgentParams(args) {
   const params = {};
   const slackUserIdIndex = args.indexOf('--slack-user-id');
+  const manualSourcesFolderIndex = args.indexOf('--manual-sources-folder');
   
   if (slackUserIdIndex !== -1 && args[slackUserIdIndex + 1]) {
     params.slackUserId = args[slackUserIdIndex + 1];
@@ -363,6 +367,10 @@ function parseAgentParams(args) {
     if (!/^U[A-Z0-9]+$/i.test(params.slackUserId)) {
       console.warn(`Warning: Slack user ID "${params.slackUserId}" doesn't match expected format (should be like U01234567AB)`);
     }
+  }
+  
+  if (manualSourcesFolderIndex !== -1 && args[manualSourcesFolderIndex + 1]) {
+    params.manualSourcesFolder = args[manualSourcesFolderIndex + 1];
   }
   
   return params;
@@ -379,7 +387,7 @@ function extractAgentNames(args) {
       continue;
     }
     
-    if (args[i] === '--start-date' || args[i] === '--end-date' || args[i] === '--slack-user-id') {
+    if (args[i] === '--start-date' || args[i] === '--end-date' || args[i] === '--slack-user-id' || args[i] === '--manual-sources-folder') {
       skipNext = true;
       continue;
     }

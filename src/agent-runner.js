@@ -283,6 +283,12 @@ export class AgentRunner {
         parameterMessage = `\n\n**IMPORTANT: Slack User ID Parameter Required**\nNo Slack user ID was provided. Please ask the user for the Slack user ID before proceeding with the analysis. The Slack user ID format is typically "U" followed by alphanumeric characters (e.g., "U01234567AB").`;
       }
     }
+    
+    if (agentName === 'business-health') {
+      if (this.agentParams.manualSourcesFolder) {
+        parameterMessage = `\n\n**IMPORTANT: Manual Sources Folder Parameter**\nThe folder to use for manual sources is: "${this.agentParams.manualSourcesFolder}"\nPlease use files from the "${this.agentParams.manualSourcesFolder}" subfolder within manual_sources. When using the read_file_from_manual_sources tool, specify filenames relative to this folder (e.g., if folder is "Week 1" and file is "ARR OV.xlsx", use filename "ARR OV.xlsx" or "Week 1/ARR OV.xlsx").`;
+      }
+    }
 
     const messages = [
       {
@@ -372,12 +378,19 @@ export class AgentRunner {
         .map(block => block.text)
         .join('\n');
 
-      return {
+      const result = {
         agentName,
         success: true,
         output: textContent,
         usage: response.usage
       };
+      
+      // Include agent-specific parameters in result for reporting
+      if (agentName === 'business-health' && this.agentParams.manualSourcesFolder) {
+        result.manualSourcesFolder = this.agentParams.manualSourcesFolder;
+      }
+      
+      return result;
 
     } catch (error) {
       const errorMessage = error.message || error.error?.message || 'Unknown error';
@@ -472,13 +485,16 @@ export class AgentRunner {
 
     // Build concise configuration - only include essential values
     const teamPMs = (this.config.team?.ovTeamMembers || [])
-      .map(m => `${m.name} (${m.email})`)
+      .map(m => `${m.name} (${m.email}, Slack: ${m.slackId || 'N/A'})`)
       .join(', ');
     const jiraTeams = (this.config.team?.jiraTeams || []).join(', ');
 
     const slackChannels = this.config.slack?.channels || {};
     const salesChannels = (slackChannels.salesChannels || []).join(', ');
     const csmChannels = (slackChannels.csmChannels || []).join(', ');
+    const productGeneral = (slackChannels.productGeneral || []).join(', ');
+    const productFeedback = (slackChannels.productFeedback || []).join(', ');
+    const teamChannels = (slackChannels.teamChannels || []).join(', ');
 
     const dateRangeText = `Start: ${startDateISO} | End: ${endDateISO}${threeDaysAgoISO ? ` | 3d ago from end: ${threeDaysAgoISO}` : ''}`;
 
@@ -492,9 +508,13 @@ PMs: ${teamPMs}
 Jira Teams: ${jiraTeams}
 
 ## Slack
+Team channels: ${teamChannels || 'None'}
+Product general channels: ${productGeneral || 'None'}
+Product feedback channels: ${productFeedback || 'None'}
 Sales channels: ${salesChannels || 'None'}
 CSM channels: ${csmChannels || 'None'}
 My user ID: ${this.config.slack?.myslackuserId || 'N/A'}
+**IMPORTANT: All channel values above are Slack channel IDs (format: C075SE700NM). Use these IDs directly in MCP tool calls, NOT channel names.**
 
 ## Jira
 OKR Board: ${this.config.jira?.ovOkrBoardId || 'N/A'}
@@ -535,13 +555,13 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
     const filesystemTools = [
       {
         name: 'read_file_from_manual_sources',
-        description: 'Read a file from the manual_sources folder (including subdirectories like Q4/). Excel files (.xlsx, .xls) will be parsed and all sheet data will be returned as JSON. CSV and text files will return their content. PDF files will be parsed and their text content extracted. Use this to access ARR data, Goodvibes exports, Mixpanel PDFs, and other files in the manual_sources directory.',
+        description: 'Read a file from the manual_sources folder (including subdirectories like Q4/). Excel files (.xlsx, .xls) will be parsed and all sheet data will be returned as JSON. CSV and text files will return their content. PDF files will be parsed and their text content extracted. Use this to access ARR data, Goodvibes exports, Mixpanel PDFs, and other files in the manual_sources directory. If a folder parameter is specified for the business-health agent, files will be read from that subfolder.',
         input_schema: {
           type: 'object',
           properties: {
             filename: {
               type: 'string',
-              description: 'The name of the file to read from the manual_sources folder. Can include subdirectories, e.g., "Q4/Good-Vibes-2025-12-29T14-11-50.csv" or "Q4/ARR Waterfall.xlsx" or "Dec 22-ARR Waterfall OV.xlsx"'
+              description: 'The name of the file to read from the manual_sources folder. Can include subdirectories, e.g., "Q4/Good-Vibes-2025-12-29T14-11-50.csv" or "Q4/ARR Waterfall.xlsx" or "Dec 22-ARR Waterfall OV.xlsx". If a folder parameter is specified, use filenames relative to that folder (e.g., "ARR OV.xlsx" if folder is "Week 1").'
             }
           },
           required: ['filename']
@@ -549,7 +569,7 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
       },
       {
         name: 'list_manual_sources_files',
-        description: 'List all files available in the manual_sources folder and its subdirectories (recursively). Use this to see what ARR data files, Goodvibes exports, Mixpanel PDFs, and other files are available. Returns files with their paths relative to manual_sources.',
+        description: 'List all files available in the manual_sources folder and its subdirectories (recursively). Use this to see what ARR data files, Goodvibes exports, Mixpanel PDFs, and other files are available. Returns files with their paths relative to manual_sources. If a folder parameter is specified for the business-health agent, only files from that subfolder will be listed.',
         input_schema: {
           type: 'object',
           properties: {},
@@ -567,7 +587,14 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
   async handleCustomTool(toolName, args) {
     if (toolName === 'read_file_from_manual_sources') {
       const manualSourcesPath = path.resolve(process.cwd(), 'manual_sources');
-      const filePath = path.resolve(manualSourcesPath, args.filename);
+      
+      // If a folder parameter is provided for business-health agent, use it as base path
+      let basePath = manualSourcesPath;
+      if (this.agentParams.manualSourcesFolder) {
+        basePath = path.resolve(manualSourcesPath, this.agentParams.manualSourcesFolder);
+      }
+      
+      const filePath = path.resolve(basePath, args.filename);
       
       // Security: ensure the file is within manual_sources directory
       const resolvedManualSources = path.resolve(manualSourcesPath);
@@ -592,8 +619,9 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
       
       if (isExcel) {
         try {
-          // Read the Excel file
-          const workbook = XLSX.readFile(filePath);
+          // Read the Excel file as a buffer (required for ES modules compatibility)
+          const fileBuffer = fs.readFileSync(filePath);
+          const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
           
           // Get all sheet names
           const sheetNames = workbook.SheetNames;
@@ -705,13 +733,27 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
         };
       }
 
-      // Recursively list all files
-      const allFiles = this.listAllFilesRecursive(manualSourcesPath);
+      // If a folder parameter is provided for business-health agent, list only that folder
+      let searchPath = manualSourcesPath;
+      if (this.agentParams.manualSourcesFolder) {
+        searchPath = path.resolve(manualSourcesPath, this.agentParams.manualSourcesFolder);
+        if (!fs.existsSync(searchPath)) {
+          return {
+            error: `Specified folder "${this.agentParams.manualSourcesFolder}" does not exist in manual_sources`,
+            path: searchPath,
+            availableFolders: this.listAllDirectoriesRecursive(manualSourcesPath).map(d => d.name)
+          };
+        }
+      }
+
+      // Recursively list all files (from searchPath, which may be a subfolder)
+      // Files are returned with paths relative to searchPath (not manual_sources root)
+      const allFiles = this.listAllFilesRecursive(searchPath, '');
       const fileDetails = allFiles.map(relativePath => {
-        const filePath = path.join(manualSourcesPath, relativePath);
+        const filePath = path.join(searchPath, relativePath);
         const stats = fs.statSync(filePath);
         return {
-          name: relativePath, // Include subdirectory path
+          name: relativePath, // Path relative to the search folder (or manual_sources root if no folder param)
           size: stats.size,
           modified: stats.mtime.toISOString(),
           type: path.extname(relativePath) || 'unknown',
@@ -719,15 +761,15 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
         };
       });
 
-      // Also list directories for context
-      const directories = this.listAllDirectoriesRecursive(manualSourcesPath);
+      // Also list directories for context (only within the search path)
+      const directories = this.listAllDirectoriesRecursive(searchPath, '');
       const dirDetails = directories.map(relativePath => ({
         name: relativePath + '/',
         isDirectory: true
       }));
 
       return {
-        folder: 'manual_sources',
+        folder: this.agentParams.manualSourcesFolder ? `manual_sources/${this.agentParams.manualSourcesFolder}` : 'manual_sources',
         directories: dirDetails,
         files: fileDetails,
         totalFiles: fileDetails.length,
