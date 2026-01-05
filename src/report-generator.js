@@ -93,7 +93,15 @@ export class ReportGenerator {
       metadata += `**Manual Sources Folder**: ${result.manualSourcesFolder}\n`;
     }
     if (result.usage) {
-      metadata += `**Token Usage**: ${result.usage.input_tokens} input, ${result.usage.output_tokens} output\n`;
+      const inputTokens = result.usage.input_tokens || 0;
+      const outputTokens = result.usage.output_tokens || 0;
+      // Claude Sonnet 4.5 pricing: $3 per 1M input tokens, $15 per 1M output tokens
+      const inputCost = (inputTokens / 1000000) * 3;
+      const outputCost = (outputTokens / 1000000) * 15;
+      const totalCost = inputCost + outputCost;
+      
+      metadata += `**Token Usage**: ${inputTokens.toLocaleString()} input, ${outputTokens.toLocaleString()} output\n`;
+      metadata += `**Cost**: $${totalCost.toFixed(4)} ($${inputCost.toFixed(4)} input + $${outputCost.toFixed(4)} output)\n`;
     }
     
     const metadataSection = metadata ? `${metadata}\n` : '';

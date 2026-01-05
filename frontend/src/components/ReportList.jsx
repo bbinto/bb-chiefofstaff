@@ -28,6 +28,33 @@ function ReportList({ reports, onReportSelect }) {
     return colors[agentName] || 'from-indigo-500 to-purple-500'
   }
 
+  const formatDateAndTime = (report) => {
+    if (!report.timestamp) {
+      return `${report.date} at ${report.time}`
+    }
+    
+    const date = new Date(report.timestamp)
+    const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    const dayOfWeek = daysOfWeek[date.getDay()]
+    
+    // Format date: "Mon, Jan 3, 2026"
+    const dateStr = date.toLocaleDateString('en-US', { 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    })
+    
+    // Format time: "2:30 PM"
+    const timeStr = date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true 
+    })
+    
+    return `${dateStr} at ${timeStr}`
+  }
+
   return (
     <div className="space-y-4">
       {reports.map(report => (
@@ -38,14 +65,19 @@ function ReportList({ reports, onReportSelect }) {
         >
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <div className="flex items-center gap-3 mb-3">
+              <div className="flex items-center gap-3 mb-2">
                 <span className={`inline-flex items-center px-3 py-1 rounded-full text-[0.625rem] font-bold bg-gradient-to-r ${getAgentColor(report.agentName)} text-white shadow-sm`}>
                   {formatAgentName(report.agentName)}
                 </span>
                 <span className="text-xs text-indigo-600 font-medium">
-                  {report.date} at {report.time}
+                  {formatDateAndTime(report)}
                 </span>
               </div>
+              {(report.oneLineSummary || (report.insights && report.insights.length > 0)) && (
+                <p className="text-sm text-gray-700 mb-2 line-clamp-2">
+                  {report.oneLineSummary || report.insights[0]}
+                </p>
+              )}
             </div>
               <div className="ml-4 flex items-center">
               <div className="bg-indigo-100 group-hover:bg-indigo-200 rounded-full p-1.5 transition-colors">

@@ -16,7 +16,65 @@ app.use(express.json());
 // Path to reports folder (one level up from frontend)
 const REPORTS_DIR = path.join(__dirname, '..', 'reports');
 
-// Extract first couple of insights from report content
+// Extract the one-line executive summary from report content
+function extractOneLineSummary(content) {
+  if (!content) return null;
+  
+  const lines = content.split('\n');
+  let inSummarySection = false;
+  let foundHeading = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Look for the "One-Line Executive Summary" heading
+    if (line.match(/^###\s+One-Line Executive Summary/i)) {
+      inSummarySection = true;
+      foundHeading = true;
+      continue;
+    }
+    
+    // If we're in the summary section, look for the actual summary content
+    if (inSummarySection && foundHeading) {
+      // Skip empty lines
+      if (line.length === 0) {
+        continue;
+      }
+      
+      // Skip if it's another heading (we've moved to the next section)
+      if (line.match(/^#{1,6}\s/)) {
+        break;
+      }
+      
+      // Skip example format lines (contain brackets with placeholders)
+      if (line.match(/^\[.*\]$/) || line.match(/\[One sentence/) || line.match(/e\.g\./)) {
+        continue;
+      }
+      
+      // Found the summary line - clean it up
+      let summary = line
+        .replace(/^[-*•]\s+/, '') // Remove list markers
+        .replace(/\[.*?\]/g, '') // Remove any remaining brackets
+        .replace(/\*\*/g, '') // Remove bold markers
+        .replace(/`/g, '') // Remove code markers
+        .trim();
+      
+      // Skip if it's still too short or looks like a template
+      if (summary.length < 20 || summary.match(/^\[/)) {
+        continue;
+      }
+      
+      // Return the first valid summary line we find
+      if (summary.length > 0) {
+        return summary;
+      }
+    }
+  }
+  
+  return null;
+}
+
+// Extract first couple of insights from report content (fallback if no one-line summary)
 function extractInsights(content) {
   if (!content) return [];
   
@@ -113,13 +171,18 @@ app.get('/api/reports', (req, res) => {
           agentName = file.replace('.md', '').toLowerCase().replace(/\s+/g, '-');
         }
         
-        // Read file content to extract insights
+        // Read file content to extract one-line summary and insights
+        let oneLineSummary = null;
         let insights = [];
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
-          insights = extractInsights(content);
+          oneLineSummary = extractOneLineSummary(content);
+          // Only extract insights as fallback if no one-line summary found
+          if (!oneLineSummary) {
+            insights = extractInsights(content);
+          }
         } catch (err) {
-          console.error(`Error reading ${file} for insights:`, err.message);
+          console.error(`Error reading ${file} for summary:`, err.message);
         }
         
         return {
@@ -130,6 +193,7 @@ app.get('/api/reports', (req, res) => {
           date: timestamp.toLocaleDateString(),
           time: timestamp.toLocaleTimeString(),
           size: stats.size,
+          oneLineSummary,
           insights
         };
       })

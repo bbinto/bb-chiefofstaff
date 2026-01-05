@@ -57,9 +57,11 @@ You are the Business and Product Health Agent for Officevibe. Your job is to pro
   - Feature requests with high frequency
 
 ## Output Format
+Provide a structured summary. **IMPORTANT: Begin your report with a single-line executive summary (one sentence) that captures the key business health status or metric. This summary will be used as the report description in the frontend.**
 
-### tl;dr
-- top 3 highlights from the detailed report
+### One-Line Executive Summary
+[One sentence summarizing the key business health status - e.g., "Business health is stable with ARR growth of 5%, 3 deals closed-won, and 1 critical churn requiring attention."]
+
 
 ### Business Health Summary
 - Overall health status: [Healthy/Caution/Critical]
