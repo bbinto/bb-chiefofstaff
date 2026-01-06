@@ -3,6 +3,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { MCP_DEFAULTS } from './utils/constants.js';
 
 /**
  * MCP Client Manager
@@ -13,9 +14,9 @@ export class MCPClientManager {
     this.clients = new Map();
     this.tools = new Map();
     // Configurable timeout settings (in milliseconds)
-    this.connectionTimeout = parseInt(process.env.MCP_CONNECTION_TIMEOUT || '30000', 10); // 30 seconds default
-    this.maxRetries = parseInt(process.env.MCP_MAX_RETRIES || '3', 10); // 3 retries default
-    this.retryDelay = parseInt(process.env.MCP_RETRY_DELAY || '2000', 10); // 2 seconds initial delay
+    this.connectionTimeout = parseInt(process.env.MCP_CONNECTION_TIMEOUT || MCP_DEFAULTS.CONNECTION_TIMEOUT, 10);
+    this.maxRetries = parseInt(process.env.MCP_MAX_RETRIES || MCP_DEFAULTS.MAX_RETRIES, 10);
+    this.retryDelay = parseInt(process.env.MCP_RETRY_DELAY || MCP_DEFAULTS.RETRY_DELAY, 10);
   }
 
   /**
@@ -203,6 +204,11 @@ export class MCPClientManager {
     const { client } = toolInfo;
     const result = await client.callTool({ name: toolName, arguments: args });
 
+    // Log results for Jira tools
+    if (this.isJiraTool(toolName, toolInfo.serverName)) {
+      this.logJiraResults(toolName, result);
+    }
+
     return result;
   }
 
@@ -222,6 +228,82 @@ export class MCPClientManager {
     return jiraIndicators.some(indicator => 
       nameLower.includes(indicator) || serverLower.includes(indicator)
     );
+  }
+
+  /**
+   * Log Jira tool results in a readable format
+   */
+  logJiraResults(toolName, result) {
+    try {
+      // Parse result if it's a string
+      let parsedResult = result;
+      if (typeof result === 'string') {
+        try {
+          parsedResult = JSON.parse(result);
+        } catch (e) {
+          // If parsing fails, result might be plain text
+          parsedResult = result;
+        }
+      }
+
+      // Handle different result formats
+      let issues = [];
+      let totalCount = 0;
+
+      if (Array.isArray(parsedResult)) {
+        issues = parsedResult;
+        totalCount = parsedResult.length;
+      } else if (parsedResult && typeof parsedResult === 'object') {
+        // Check for common Jira response structures
+        if (parsedResult.issues && Array.isArray(parsedResult.issues)) {
+          issues = parsedResult.issues;
+          totalCount = parsedResult.total || parsedResult.issues.length;
+        } else if (parsedResult.items && Array.isArray(parsedResult.items)) {
+          issues = parsedResult.items;
+          totalCount = parsedResult.total || parsedResult.items.length;
+        } else if (parsedResult.results && Array.isArray(parsedResult.results)) {
+          issues = parsedResult.results;
+          totalCount = parsedResult.total || parsedResult.results.length;
+        } else {
+          // Single issue or other structure
+          totalCount = 1;
+          issues = [parsedResult];
+        }
+      }
+
+      // Log summary
+      if (totalCount > 0) {
+        console.log(`[Jira Results] ${toolName}:`);
+        console.log(`  ✓ Found ${totalCount} issue(s)`);
+        
+        // Log first few issue keys/titles for quick reference
+        if (issues.length > 0 && issues.length <= 10) {
+          const summaries = issues.slice(0, 5).map(issue => {
+            const key = issue.key || issue.id || issue.issueKey || 'N/A';
+            const title = issue.fields?.summary || issue.summary || issue.title || 'No title';
+            return `    - ${key}: ${title.substring(0, 60)}${title.length > 60 ? '...' : ''}`;
+          });
+          if (summaries.length > 0) {
+            console.log(`  Top ${summaries.length} issue(s):`);
+            summaries.forEach(summary => console.log(summary));
+          }
+        } else if (issues.length > 10) {
+          const summaries = issues.slice(0, 5).map(issue => {
+            const key = issue.key || issue.id || issue.issueKey || 'N/A';
+            const title = issue.fields?.summary || issue.summary || issue.title || 'No title';
+            return `    - ${key}: ${title.substring(0, 60)}${title.length > 60 ? '...' : ''}`;
+          });
+          console.log(`  Top 5 issues (showing ${totalCount} total):`);
+          summaries.forEach(summary => console.log(summary));
+        }
+        console.log(''); // Empty line for readability
+      } else {
+        console.log(`[Jira Results] ${toolName}: No issues found\n`);
+      }
+    } catch (error) {
+      // If logging fails, don't break the tool call
+      console.log(`[Jira Results] ${toolName}: (unable to parse results)\n`);
+    }
   }
 
   /**

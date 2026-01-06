@@ -1,8 +1,20 @@
 import Anthropic from '@anthropic-ai/sdk';
 import fs from 'fs';
 import path from 'path';
-import XLSX from 'xlsx';
-import pdfParse from 'pdf-parse';
+import { RateLimiter } from './agent/rate-limiter.js';
+import { MessageTruncator } from './agent/message-truncator.js';
+import { ToolHandler } from './agent/tool-handler.js';
+import { calculateDateRange, formatDateRangeDisplay } from './utils/date-utils.js';
+import {
+  API_DEFAULTS,
+  PATHS,
+  TOKEN_LIMITS,
+  MESSAGE_TRUNCATION,
+  RATE_LIMITING,
+  RETRY_CONFIG,
+  HTTP_STATUS,
+  ERROR_TYPES
+} from './utils/constants.js';
 
 /**
  * Agent Runner
@@ -17,145 +29,25 @@ export class AgentRunner {
     this.anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY
     });
-    this.model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
-    
-    // Rate limiting: 30,000 tokens per minute
-    // Add delay between calls to stay under limit
-    this.minDelayBetweenCalls = 5000; // 5 seconds minimum (more conservative)
-    this.lastCallTime = 0;
-    this.tokenUsageWindow = []; // Track tokens used in the last minute
-    this.maxTokensPerMinute = 25000; // More conservative buffer (30k limit - 5k safety margin)
-    this.consecutiveRateLimitErrors = 0; // Track consecutive rate limit errors
+    this.model = process.env.CLAUDE_MODEL || API_DEFAULTS.MODEL;
+
+    // Initialize helper classes
+    this.rateLimiter = new RateLimiter();
+    this.messageTruncator = new MessageTruncator();
+    this.toolHandler = new ToolHandler(agentParams);
   }
 
   /**
    * Load agent instructions from markdown file
    */
   loadAgentInstructions(agentName) {
-    const agentPath = path.join(process.cwd(), 'agents', `${agentName}.md`);
+    const agentPath = path.join(process.cwd(), PATHS.AGENTS_DIR, `${agentName}.md`);
     if (!fs.existsSync(agentPath)) {
       throw new Error(`Agent file not found: ${agentPath}`);
     }
     return fs.readFileSync(agentPath, 'utf8');
   }
 
-  /**
-   * Rough estimate of token count from messages (approximation: ~4 chars per token)
-   */
-  estimateTokenCount(messages, tools) {
-    let totalChars = 0;
-    
-    // Count characters in messages
-    for (const msg of messages) {
-      if (typeof msg.content === 'string') {
-        totalChars += msg.content.length;
-      } else if (Array.isArray(msg.content)) {
-        for (const block of msg.content) {
-          if (block.type === 'text' && block.text) {
-            totalChars += block.text.length;
-          } else if (block.type === 'tool_use' && block.input) {
-            totalChars += JSON.stringify(block.input).length;
-          } else if (block.type === 'tool_result' && block.content) {
-            totalChars += typeof block.content === 'string' ? block.content.length : JSON.stringify(block.content).length;
-          }
-        }
-      }
-    }
-    
-    // Add tool schema overhead (rough estimate: ~100 tokens per tool)
-    const toolOverhead = tools ? tools.length * 100 : 0;
-    
-    // Rough approximation: ~4 characters per token (conservative)
-    const estimatedTokens = Math.ceil(totalChars / 4) + toolOverhead;
-    
-    return estimatedTokens;
-  }
-
-  /**
-   * Truncate messages to stay under token limit
-   * Keeps the initial user message (instructions) and recent tool interactions
-   */
-  truncateMessages(messages, maxTokens = 180000, tools = []) {
-    // Always keep the first message (instructions)
-    if (messages.length <= 1) {
-      return messages;
-    }
-
-    const firstMessage = messages[0];
-    const recentMessages = [];
-    
-    // Start from the end and work backwards, keeping recent messages
-    // until we approach the limit
-    const baseTokens = this.estimateTokenCount([firstMessage], tools);
-    
-    // Keep at least the last few messages (recent tool interactions)
-    const minRecentMessages = 4; // Keep at least last 4 messages (2 tool interaction pairs)
-    let messagesKept = 0;
-    
-    for (let i = messages.length - 1; i >= 1; i--) {
-      // Test if adding this message would exceed limit
-      const testMessages = [firstMessage, ...recentMessages, messages[i]];
-      const testTokens = this.estimateTokenCount(testMessages, tools);
-      
-      // If adding this message would exceed limit and we've kept minimum, stop
-      if (testTokens > maxTokens && messagesKept >= minRecentMessages) {
-        break;
-      }
-      
-      // Add this message to recent messages (at the beginning since we're going backwards)
-      recentMessages.unshift(messages[i]);
-      messagesKept++;
-    }
-    
-    const truncated = [firstMessage, ...recentMessages];
-    const finalTokens = this.estimateTokenCount(truncated, tools);
-    
-    if (messages.length > truncated.length) {
-      const removed = messages.length - truncated.length;
-      console.log(`⚠️  Message truncation: Removed ${removed} old message(s), kept ${truncated.length}/${messages.length} messages`);
-      console.log(`   Token count: ${Math.round(finalTokens/1000)}k (limit: ${Math.round(maxTokens/1000)}k)`);
-    }
-    
-    return truncated;
-  }
-
-  /**
-   * Wait to respect rate limits
-   */
-  async waitForRateLimit(estimatedTokens = 0) {
-    const now = Date.now();
-    const timeSinceLastCall = now - this.lastCallTime;
-    
-    // Clean up old token usage entries (older than 1 minute)
-    const oneMinuteAgo = now - 60000;
-    this.tokenUsageWindow = this.tokenUsageWindow.filter(entry => entry.time > oneMinuteAgo);
-    
-    // Calculate current token usage in the last minute
-    const tokensUsed = this.tokenUsageWindow.reduce((sum, entry) => sum + entry.tokens, 0);
-    
-    // If this request would exceed the limit, wait longer
-    const projectedUsage = tokensUsed + estimatedTokens;
-    const usageRatio = tokensUsed / this.maxTokensPerMinute;
-    
-    if (projectedUsage > this.maxTokensPerMinute) {
-      // We would exceed the limit, wait until enough tokens are available
-      const tokensToWaitFor = projectedUsage - this.maxTokensPerMinute * 0.8; // Wait until 80% capacity
-      // Assuming tokens expire at a rate of maxTokensPerMinute per minute
-      const waitTime = Math.ceil((tokensToWaitFor / this.maxTokensPerMinute) * 60000) + 2000; // Add 2s buffer
-      console.log(`Rate limit: ${tokensUsed}/${this.maxTokensPerMinute} tokens used (${Math.round(usageRatio * 100)}%), estimated request: ${estimatedTokens} tokens, waiting ${Math.ceil(waitTime / 1000)}s...`);
-      await this.sleep(Math.min(waitTime, 60000)); // Cap at 60 seconds
-    } else if (usageRatio > 0.7) {
-      // If we're over 70% capacity, use longer delays
-      const waitTime = Math.max(this.minDelayBetweenCalls * 3, 15000);
-      console.log(`Rate limit: ${tokensUsed}/${this.maxTokensPerMinute} tokens used (${Math.round(usageRatio * 100)}%), waiting ${Math.ceil(waitTime / 1000)}s...`);
-      await this.sleep(waitTime);
-    } else if (timeSinceLastCall < this.minDelayBetweenCalls) {
-      const waitTime = this.minDelayBetweenCalls - timeSinceLastCall;
-      await this.sleep(waitTime);
-    }
-    
-    this.lastCallTime = Date.now();
-  }
 
   /**
    * Sleep utility
@@ -167,56 +59,55 @@ export class AgentRunner {
   /**
    * Make API call with rate limiting and retry logic
    */
-  async makeApiCall(params, retries = 5) {
+  async makeApiCall(params, retries = RETRY_CONFIG.MAX_RETRIES) {
     // Estimate tokens before making the call
-    const estimatedTokens = this.estimateTokenCount(params.messages || [], params.tools || []);
-    
+    const estimatedTokens = this.messageTruncator.estimateTokenCount(params.messages || [], params.tools || []);
+
     for (let attempt = 0; attempt < retries; attempt++) {
       try {
-        await this.waitForRateLimit(estimatedTokens);
-        
+        await this.rateLimiter.waitForRateLimit(estimatedTokens);
+
         const response = await this.anthropic.messages.create(params);
-        
+
         // Track token usage (use actual input tokens from response)
         if (response.usage) {
           const inputTokens = response.usage.input_tokens || 0;
-          this.tokenUsageWindow.push({
-            time: Date.now(),
-            tokens: inputTokens
-          });
-          
-          // Reset consecutive rate limit errors on success
-          this.consecutiveRateLimitErrors = 0;
+          this.rateLimiter.trackTokenUsage(inputTokens);
+          this.rateLimiter.resetConsecutiveErrors();
         }
-        
+
         return response;
       } catch (error) {
         // Check if it's a rate limit error (handle various error formats)
         const errorMessage = (error.message || error.error?.message || JSON.stringify(error) || '').toLowerCase();
         const errorType = error.error?.type || error.type;
-        const isRateLimitError = error.status === 429 || 
-                                 error.statusCode === 429 ||
-                                 errorType === 'rate_limit_error' ||
+        const isRateLimitError = error.status === HTTP_STATUS.RATE_LIMIT ||
+                                 error.statusCode === HTTP_STATUS.RATE_LIMIT ||
+                                 errorType === ERROR_TYPES.RATE_LIMIT_ERROR ||
                                  errorMessage.includes('rate_limit') ||
                                  errorMessage.includes('rate limit') ||
                                  errorMessage.includes('would exceed the rate limit');
-        
+
         // Check if it's a "prompt too long" error
-        const isPromptTooLong = error.status === 400 &&
-                                (errorType === 'invalid_request_error' ||
+        const isPromptTooLong = error.status === HTTP_STATUS.BAD_REQUEST &&
+                                (errorType === ERROR_TYPES.INVALID_REQUEST_ERROR ||
                                  errorMessage.includes('prompt is too long') ||
                                  errorMessage.includes('too long') ||
                                  errorMessage.includes('maximum'));
-        
+
         if (isPromptTooLong) {
           console.error(`❌ Prompt too long error: ${error.error?.message || errorMessage}`);
           console.error('This indicates the conversation history has exceeded the token limit.');
           console.error('The system will attempt to truncate messages and retry...');
-          
+
           if (attempt < retries - 1) {
             // Truncate messages more aggressively
             if (params.messages) {
-              const truncated = this.truncateMessages(params.messages, 150000, params.tools); // More aggressive truncation
+              const truncated = this.messageTruncator.truncateMessages(
+                params.messages,
+                MESSAGE_TRUNCATION.AGGRESSIVE_TRUNCATION_LIMIT,
+                params.tools
+              );
               // Replace the messages array contents (preserve reference for caller)
               params.messages.length = 0;
               params.messages.push(...truncated);
@@ -224,35 +115,18 @@ export class AgentRunner {
               continue;
             }
           }
-          
+
           // If we can't truncate or out of retries, throw with helpful message
-          throw new Error(`Prompt too long (exceeds 200k token limit). Try running the agent with fewer data sources or split the work into smaller tasks.`);
+          throw new Error(`Prompt too long (exceeds ${TOKEN_LIMITS.MAX_TOTAL_TOKENS / 1000}k token limit). Try running the agent with fewer data sources or split the work into smaller tasks.`);
         }
-        
+
         if (isRateLimitError) {
-          this.consecutiveRateLimitErrors++;
-          
+          await this.rateLimiter.handleRateLimitError(attempt, retries);
           if (attempt < retries - 1) {
-            // More aggressive exponential backoff for rate limits
-            // Start at 30 seconds, then 60, 90, 120 seconds
-            const backoffTime = Math.min(30000 * (attempt + 1), 120000);
-            console.log(`Rate limit hit (${this.consecutiveRateLimitErrors} consecutive), waiting ${Math.ceil(backoffTime / 1000)}s before retry (attempt ${attempt + 1}/${retries})...`);
-            
-            // Also wait for the rate limit window to clear
-            const waitForWindow = 65000; // Wait 65 seconds to ensure a new minute window
-            await this.sleep(Math.max(backoffTime, waitForWindow));
-            
-            // Reset token usage window if we've had multiple consecutive errors
-            if (this.consecutiveRateLimitErrors >= 2) {
-              console.log('Resetting token usage window after consecutive rate limit errors...');
-              this.tokenUsageWindow = [];
-              this.lastCallTime = 0;
-            }
-            
             continue;
           }
         }
-        
+
         // If not a rate limit error or out of retries, throw
         throw error;
       }
@@ -303,7 +177,7 @@ export class AgentRunner {
     try {
       let response = await this.makeApiCall({
         model: this.model,
-        max_tokens: 8000,
+        max_tokens: API_DEFAULTS.MAX_TOKENS,
         tools,
         messages
       });
@@ -353,20 +227,20 @@ export class AgentRunner {
 
         // Get next response with rate limiting
         // Add extra delay after tool execution to prevent rapid-fire requests
-        await this.sleep(1000); // 1 second delay after tool execution
-        
+        await this.sleep(RATE_LIMITING.TOOL_EXECUTION_DELAY);
+
         // Check token count and truncate if needed (keep under 180k to leave buffer)
-        const estimatedTokens = this.estimateTokenCount(messages, tools);
-        const maxPromptTokens = 180000; // Leave 20k buffer below 200k limit
-        
+        const estimatedTokens = this.messageTruncator.estimateTokenCount(messages, tools);
+        const maxPromptTokens = TOKEN_LIMITS.MAX_PROMPT_TOKENS;
+
         if (estimatedTokens > maxPromptTokens) {
           console.log(`⚠️  Token count (${Math.round(estimatedTokens/1000)}k) exceeds limit, truncating messages...`);
-          messages = this.truncateMessages(messages, maxPromptTokens, tools);
+          messages = this.messageTruncator.truncateMessages(messages, maxPromptTokens, tools);
         }
         
         response = await this.makeApiCall({
           model: this.model,
-          max_tokens: 8000,
+          max_tokens: API_DEFAULTS.MAX_TOKENS,
           tools,
           messages
         });
@@ -488,7 +362,8 @@ export class AgentRunner {
       .map(m => `${m.name} (${m.email}, Slack: ${m.slackId || 'N/A'})`)
       .join(', ');
     const jiraTeams = (this.config.team?.jiraTeams || []).join(', ');
-
+    const jiraProducts = (this.config.team?.jiraProducts || []).join(', ');
+    const ovEntireTeam = (this.config.team?.OVEntireTeam || []).join(', ');
     const slackChannels = this.config.slack?.channels || {};
     const salesChannels = (slackChannels.salesChannels || []).join(', ');
     const csmChannels = (slackChannels.csmChannels || []).join(', ');
@@ -497,6 +372,7 @@ export class AgentRunner {
     const teamChannels = (slackChannels.teamChannels || []).join(', ');
 
     const dateRangeText = `Start: ${startDateISO} | End: ${endDateISO}${threeDaysAgoISO ? ` | 3d ago from end: ${threeDaysAgoISO}` : ''}`;
+    const calendarNames = (this.config.calendar?.name || []).join(', ');
 
     return `# Configuration (Concise Format)
 
@@ -506,6 +382,12 @@ ${dateRangeText}
 ## Team
 PMs: ${teamPMs}
 Jira Teams: ${jiraTeams}
+Jira Products: ${jiraProducts}
+OV Entire Team: ${ovEntireTeam}
+
+## Calendar
+Calendar Names: ${calendarNames || 'None'}
+**IMPORTANT: Use google-calendar MCP tools (list-calendars, list-events, search-events, get-freebusy) to access these calendars. Calendar names from config: ${calendarNames || 'None'}. You can use calendar names directly in the tools - they support both calendar IDs and calendar names.**
 
 ## Slack
 Team channels: ${teamChannels || 'None'}
@@ -519,6 +401,7 @@ My user ID: ${this.config.slack?.myslackuserId || 'N/A'}
 ## Jira
 OKR Board: ${this.config.jira?.ovOkrBoardId || 'N/A'}
 Project: ${this.config.jira?.projectKey || 'N/A'}
+OV Project: ${this.config.jira?.OVprojectKey || 'N/A'}
 
 ## Confluence
 VoC Page ID: ${this.config.confluence?.vocPageId || 'N/A'}
@@ -551,274 +434,16 @@ Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date ra
       }
     }));
 
-    // Add custom filesystem tools for reading manual_sources
-    const filesystemTools = [
-      {
-        name: 'read_file_from_manual_sources',
-        description: 'Read a file from the manual_sources folder (including subdirectories like Q4/). Excel files (.xlsx, .xls) will be parsed and all sheet data will be returned as JSON. CSV and text files will return their content. PDF files will be parsed and their text content extracted. Use this to access ARR data, Goodvibes exports, Mixpanel PDFs, and other files in the manual_sources directory. If a folder parameter is specified for the business-health agent, files will be read from that subfolder.',
-        input_schema: {
-          type: 'object',
-          properties: {
-            filename: {
-              type: 'string',
-              description: 'The name of the file to read from the manual_sources folder. Can include subdirectories, e.g., "Q4/Good-Vibes-2025-12-29T14-11-50.csv" or "Q4/ARR Waterfall.xlsx" or "Dec 22-ARR Waterfall OV.xlsx". If a folder parameter is specified, use filenames relative to that folder (e.g., "ARR OV.xlsx" if folder is "Week 1").'
-            }
-          },
-          required: ['filename']
-        }
-      },
-      {
-        name: 'list_manual_sources_files',
-        description: 'List all files available in the manual_sources folder and its subdirectories (recursively). Use this to see what ARR data files, Goodvibes exports, Mixpanel PDFs, and other files are available. Returns files with their paths relative to manual_sources. If a folder parameter is specified for the business-health agent, only files from that subfolder will be listed.',
-        input_schema: {
-          type: 'object',
-          properties: {},
-          required: []
-        }
-      }
-    ];
+    // Add custom filesystem tools using ToolHandler
+    const filesystemTools = this.toolHandler.buildCustomToolsSchema();
 
     return [...mcpTools, ...filesystemTools];
   }
 
   /**
-   * Handle custom filesystem tool calls
+   * Handle custom filesystem tool calls (delegated to ToolHandler)
    */
   async handleCustomTool(toolName, args) {
-    if (toolName === 'read_file_from_manual_sources') {
-      const manualSourcesPath = path.resolve(process.cwd(), 'manual_sources');
-      
-      // If a folder parameter is provided for business-health agent, use it as base path
-      let basePath = manualSourcesPath;
-      if (this.agentParams.manualSourcesFolder) {
-        basePath = path.resolve(manualSourcesPath, this.agentParams.manualSourcesFolder);
-      }
-      
-      const filePath = path.resolve(basePath, args.filename);
-      
-      // Security: ensure the file is within manual_sources directory
-      const resolvedManualSources = path.resolve(manualSourcesPath);
-      if (!filePath.startsWith(resolvedManualSources + path.sep) && filePath !== resolvedManualSources) {
-        throw new Error('Invalid file path: file must be in manual_sources folder');
-      }
-
-      if (!fs.existsSync(filePath)) {
-        // Try to provide helpful error message with available files
-        const availableFiles = this.listAllFilesRecursive(manualSourcesPath);
-        return {
-          error: `File not found: ${args.filename}`,
-          availableFiles: availableFiles.slice(0, 20).join(', '), // Show first 20 files
-          totalFiles: availableFiles.length,
-          hint: 'Use list_manual_sources_files to see all available files including those in subdirectories like Q4/'
-        };
-      }
-
-      // For Excel files, parse and return the data
-      const stats = fs.statSync(filePath);
-      const isExcel = filePath.endsWith('.xlsx') || filePath.endsWith('.xls');
-      
-      if (isExcel) {
-        try {
-          // Read the Excel file as a buffer (required for ES modules compatibility)
-          const fileBuffer = fs.readFileSync(filePath);
-          const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-          
-          // Get all sheet names
-          const sheetNames = workbook.SheetNames;
-          
-          // Parse all sheets into JSON
-          const sheetsData = {};
-          sheetNames.forEach(sheetName => {
-            const worksheet = workbook.Sheets[sheetName];
-            // Convert to JSON with header row
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-              defval: '', // Use empty string for empty cells
-              raw: false // Format values (dates, numbers, etc.)
-            });
-            sheetsData[sheetName] = jsonData;
-          });
-          
-          return {
-            file: args.filename,
-            type: 'Excel file',
-            modified: stats.mtime.toISOString(),
-            sheetNames: sheetNames,
-            data: sheetsData,
-            summary: `Excel file with ${sheetNames.length} sheet(s): ${sheetNames.join(', ')}. Data parsed successfully.`
-          };
-        } catch (error) {
-          return {
-            file: args.filename,
-            type: 'Excel file',
-            error: `Error parsing Excel file: ${error.message}`,
-            modified: stats.mtime.toISOString()
-          };
-        }
-      }
-
-      // For CSV files, read the content
-      const isCSV = filePath.endsWith('.csv');
-      if (isCSV) {
-        try {
-          const content = fs.readFileSync(filePath, 'utf8');
-          return {
-            file: args.filename,
-            type: 'CSV file',
-            modified: stats.mtime.toISOString(),
-            content: content,
-            size: stats.size,
-            lines: content.split('\n').length
-          };
-        } catch (error) {
-          return {
-            error: `Error reading CSV file: ${error.message}`,
-            file: args.filename
-          };
-        }
-      }
-
-      // For PDF files, parse and return the content
-      const isPDF = filePath.endsWith('.pdf');
-      if (isPDF) {
-        try {
-          const dataBuffer = fs.readFileSync(filePath);
-          const pdfData = await pdfParse(dataBuffer);
-          
-          return {
-            file: args.filename,
-            type: 'PDF file',
-            modified: stats.mtime.toISOString(),
-            size: stats.size,
-            pages: pdfData.numpages,
-            text: pdfData.text,
-            info: pdfData.info || {},
-            metadata: pdfData.metadata || {},
-            summary: `PDF file parsed successfully. ${pdfData.numpages} page(s). ${pdfData.text.length} characters of text extracted.`
-          };
-        } catch (error) {
-          return {
-            file: args.filename,
-            type: 'PDF file',
-            error: `Error parsing PDF file: ${error.message}`,
-            modified: stats.mtime.toISOString(),
-            size: stats.size
-          };
-        }
-      }
-
-      // For other text files, read the content
-      try {
-        const content = fs.readFileSync(filePath, 'utf8');
-        return {
-          file: args.filename,
-          type: 'Text file',
-          modified: stats.mtime.toISOString(),
-          content: content
-        };
-      } catch (error) {
-        return {
-          error: `Error reading file: ${error.message}`,
-          file: args.filename
-        };
-      }
-    }
-
-    if (toolName === 'list_manual_sources_files') {
-      const manualSourcesPath = path.resolve(process.cwd(), 'manual_sources');
-      
-      if (!fs.existsSync(manualSourcesPath)) {
-        return {
-          error: 'manual_sources folder does not exist',
-          path: manualSourcesPath
-        };
-      }
-
-      // If a folder parameter is provided for business-health agent, list only that folder
-      let searchPath = manualSourcesPath;
-      if (this.agentParams.manualSourcesFolder) {
-        searchPath = path.resolve(manualSourcesPath, this.agentParams.manualSourcesFolder);
-        if (!fs.existsSync(searchPath)) {
-          return {
-            error: `Specified folder "${this.agentParams.manualSourcesFolder}" does not exist in manual_sources`,
-            path: searchPath,
-            availableFolders: this.listAllDirectoriesRecursive(manualSourcesPath).map(d => d.name)
-          };
-        }
-      }
-
-      // Recursively list all files (from searchPath, which may be a subfolder)
-      // Files are returned with paths relative to searchPath (not manual_sources root)
-      const allFiles = this.listAllFilesRecursive(searchPath, '');
-      const fileDetails = allFiles.map(relativePath => {
-        const filePath = path.join(searchPath, relativePath);
-        const stats = fs.statSync(filePath);
-        return {
-          name: relativePath, // Path relative to the search folder (or manual_sources root if no folder param)
-          size: stats.size,
-          modified: stats.mtime.toISOString(),
-          type: path.extname(relativePath) || 'unknown',
-          isDirectory: false
-        };
-      });
-
-      // Also list directories for context (only within the search path)
-      const directories = this.listAllDirectoriesRecursive(searchPath, '');
-      const dirDetails = directories.map(relativePath => ({
-        name: relativePath + '/',
-        isDirectory: true
-      }));
-
-      return {
-        folder: this.agentParams.manualSourcesFolder ? `manual_sources/${this.agentParams.manualSourcesFolder}` : 'manual_sources',
-        directories: dirDetails,
-        files: fileDetails,
-        totalFiles: fileDetails.length,
-        totalDirectories: dirDetails.length
-      };
-    }
-
-    throw new Error(`Unknown custom tool: ${toolName}`);
-  }
-
-  /**
-   * Recursively list all files in a directory
-   */
-  listAllFilesRecursive(dirPath, basePath = '') {
-    const files = [];
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-      const relativePath = basePath ? path.join(basePath, entry.name) : entry.name;
-
-      if (entry.isDirectory()) {
-        // Recursively list files in subdirectories
-        files.push(...this.listAllFilesRecursive(fullPath, relativePath));
-      } else {
-        files.push(relativePath);
-      }
-    }
-
-    return files;
-  }
-
-  /**
-   * Recursively list all directories in a directory
-   */
-  listAllDirectoriesRecursive(dirPath, basePath = '') {
-    const directories = [];
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const relativePath = basePath ? path.join(basePath, entry.name) : entry.name;
-        directories.push(relativePath);
-        // Recursively list subdirectories
-        const fullPath = path.join(dirPath, entry.name);
-        directories.push(...this.listAllDirectoriesRecursive(fullPath, relativePath));
-      }
-    }
-
-    return directories;
+    return await this.toolHandler.handleCustomTool(toolName, args);
   }
 }

@@ -3,136 +3,90 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { extractOneLineSummary, extractInsights } from '../src/utils/summary-extractor.js';
+import { FRONTEND, PATHS } from '../src/utils/constants.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = 3001;
+const PORT = FRONTEND.PORT;
 
 app.use(cors());
 app.use(express.json());
 
 // Path to reports folder (one level up from frontend)
-const REPORTS_DIR = path.join(__dirname, '..', 'reports');
+const REPORTS_DIR = path.join(__dirname, '..', PATHS.REPORTS_DIR);
 
-// Extract the one-line executive summary from report content
-function extractOneLineSummary(content) {
-  if (!content) return null;
-  
-  const lines = content.split('\n');
-  let inSummarySection = false;
-  let foundHeading = false;
-  
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    
-    // Look for the "One-Line Executive Summary" heading
-    if (line.match(/^###\s+One-Line Executive Summary/i)) {
-      inSummarySection = true;
-      foundHeading = true;
-      continue;
-    }
-    
-    // If we're in the summary section, look for the actual summary content
-    if (inSummarySection && foundHeading) {
-      // Skip empty lines
-      if (line.length === 0) {
-        continue;
-      }
-      
-      // Skip if it's another heading (we've moved to the next section)
-      if (line.match(/^#{1,6}\s/)) {
-        break;
-      }
-      
-      // Skip example format lines (contain brackets with placeholders)
-      if (line.match(/^\[.*\]$/) || line.match(/\[One sentence/) || line.match(/e\.g\./)) {
-        continue;
-      }
-      
-      // Found the summary line - clean it up
-      let summary = line
-        .replace(/^[-*•]\s+/, '') // Remove list markers
-        .replace(/\[.*?\]/g, '') // Remove any remaining brackets
-        .replace(/\*\*/g, '') // Remove bold markers
-        .replace(/`/g, '') // Remove code markers
-        .trim();
-      
-      // Skip if it's still too short or looks like a template
-      if (summary.length < 20 || summary.match(/^\[/)) {
-        continue;
-      }
-      
-      // Return the first valid summary line we find
-      if (summary.length > 0) {
-        return summary;
-      }
-    }
-  }
-  
-  return null;
+// Serve static files from dist folder if it exists (production build)
+const DIST_DIR = path.join(__dirname, 'dist');
+if (fs.existsSync(DIST_DIR)) {
+  app.use(express.static(DIST_DIR));
 }
 
-// Extract first couple of insights from report content (fallback if no one-line summary)
-function extractInsights(content) {
-  if (!content) return [];
-  
-  const insights = [];
-  const lines = content.split('\n');
-  
-  for (let i = 0; i < lines.length && insights.length < 2; i++) {
-    const line = lines[i].trim();
-    
-    // Skip headers and metadata
-    if (line.startsWith('#') || line.startsWith('**Generated') || line.startsWith('---') || line.length === 0) {
-      continue;
-    }
-    
-    // Look for bullet points or numbered lists
-    if (line.match(/^[-*•]\s+|^\d+\.\s+/)) {
-      const insight = line.replace(/^[-*•]\s+|^\d+\.\s+/, '').trim();
-      if (insight.length > 20 && insight.length < 200) {
-        insights.push(insight);
-      }
-    }
-    
-    // Look for key-value pairs or status indicators
-    if (line.match(/status:|flag:|⚠️|✅|🟡|🔴/) && insights.length < 2) {
-      const insight = line.replace(/status:|flag:/i, '').trim();
-      if (insight.length > 10 && insight.length < 200) {
-        insights.push(insight);
-      }
-    }
-    
-    // Look for sentences that seem like insights (contain key words)
-    if (insights.length < 2 && line.length > 30 && line.length < 300) {
-      if (line.match(/\b(total|found|identified|shows|indicates|recommend|critical|important|concern|risk|issue)\b/i)) {
-        // Make sure it's not a header or metadata
-        if (!line.match(/^#{1,6}\s/) && !line.match(/^\[/) && !line.match(/^`/)) {
-          insights.push(line);
-        }
-      }
-    }
+// Root route - show helpful message or serve frontend
+app.get('/', (req, res) => {
+  // If dist folder exists, serve the built frontend
+  if (fs.existsSync(DIST_DIR)) {
+    return res.sendFile(path.join(DIST_DIR, 'index.html'));
   }
   
-  // If we didn't find enough insights, get first meaningful sentences
-  if (insights.length < 2) {
-    for (let i = 0; i < lines.length && insights.length < 2; i++) {
-      const line = lines[i].trim();
-      if (line.length > 40 && line.length < 250 && 
-          !line.startsWith('#') && 
-          !line.startsWith('**Generated') && 
-          !line.startsWith('---') &&
-          !line.match(/^\[/) &&
-          !line.match(/^`/)) {
-        insights.push(line);
-      }
-    }
-  }
-  
-  return insights.slice(0, 2);
-}
+  // Otherwise, show helpful message
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Chief of Staff API Server</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+          }
+          h1 { color: #333; }
+          code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+          }
+          .endpoint {
+            background: #f9f9f9;
+            padding: 15px;
+            border-left: 4px solid #007bff;
+            margin: 10px 0;
+          }
+        </style>
+      </head>
+      <body>
+        <h1>🚀 Chief of Staff API Server</h1>
+        <p>Server is running on <code>http://localhost:${PORT}</code></p>
+        
+        <h2>Available Endpoints:</h2>
+        <div class="endpoint">
+          <strong>GET</strong> <code>/api/reports</code> - Get all reports
+        </div>
+        <div class="endpoint">
+          <strong>GET</strong> <code>/api/reports/:filename</code> - Get a specific report
+        </div>
+        <div class="endpoint">
+          <strong>GET</strong> <code>/api/agents</code> - Get unique agent names
+        </div>
+        
+        <h2>To View the Frontend:</h2>
+        <p>Run the Vite dev server in a separate terminal:</p>
+        <pre><code>npm run dev</code></pre>
+        <p>Then open <code>http://localhost:3000</code> in your browser.</p>
+        
+        <p><em>Or build the frontend and it will be served automatically from this server.</em></p>
+      </body>
+    </html>
+  `);
+});
+
+// Extraction functions now imported from ../src/utils/summary-extractor.js
 
 // Get all reports
 app.get('/api/reports', (req, res) => {

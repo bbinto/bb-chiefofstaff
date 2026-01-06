@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import 'dotenv/config';
-import fs from 'fs';
-import path from 'path';
 import { MCPClientManager } from './mcp-client.js';
 import { AgentRunner } from './agent-runner.js';
 import { ReportGenerator } from './report-generator.js';
+import { ConfigManager, validateEnvironment } from './config/config-manager.js';
+import { parseCliArguments, displayHelp, logParsedArguments, validateAgentRequirements } from './utils/cli-parser.js';
+import { AGENT_EXECUTION } from './utils/constants.js';
 
 /**
  * Master Chief of Staff Agent
@@ -14,6 +15,7 @@ import { ReportGenerator } from './report-generator.js';
 class ChiefOfStaffAgent {
   constructor(dateRange = null, agentParams = {}) {
     this.mcpClient = null;
+    this.configManager = new ConfigManager();
     this.config = null;
     this.agentRunner = null;
     this.reportGenerator = new ReportGenerator();
@@ -25,6 +27,9 @@ class ChiefOfStaffAgent {
       'weekly-recap',
       'business-health',
       'product-engineering',
+      'telemetry-deepdive',
+      'team-pulse',
+      'pingboard-migration',
       'jira-tracker',
       'okr-progress',
       'productivity-weekly-tracker',
@@ -36,36 +41,15 @@ class ChiefOfStaffAgent {
   }
 
   /**
-   * Load configuration
+   * Load configuration using ConfigManager
    */
   loadConfig() {
-    const configPath = path.join(process.cwd(), 'config.json');
-
-    if (!fs.existsSync(configPath)) {
-      console.error('Error: config.json not found!');
-      console.log('Please copy config.example.json to config.json and configure it.');
-      process.exit(1);
-    }
-
     try {
-      this.config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      console.log('Configuration loaded successfully');
+      this.config = this.configManager.loadConfig();
     } catch (error) {
-      console.error('Error loading config.json:', error.message);
+      console.error(error.message);
       process.exit(1);
     }
-  }
-
-  /**
-   * Validate environment
-   */
-  validateEnvironment() {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      console.error('Error: ANTHROPIC_API_KEY not found in environment!');
-      console.log('Please create a .env file with your Anthropic API key.');
-      process.exit(1);
-    }
-    console.log('Environment validated');
   }
 
   /**
@@ -76,7 +60,7 @@ class ChiefOfStaffAgent {
     console.log('CHIEF OF STAFF AGENT - INITIALIZING');
     console.log('='.repeat(80) + '\n');
 
-    this.validateEnvironment();
+    validateEnvironment();
     this.loadConfig();
 
     // Initialize MCP client
@@ -121,8 +105,9 @@ class ChiefOfStaffAgent {
         
         // Add delay between agents (except after the last one) to help with rate limits
         if (i < this.agents.length - 1) {
-          console.log('Waiting 10 seconds before next agent...\n');
-          await this.sleep(10000); // Increased to 10 seconds for better rate limit management
+          const delay = AGENT_EXECUTION.DELAY_BETWEEN_AGENTS;
+          console.log(`Waiting ${delay / 1000} seconds before next agent...\n`);
+          await this.sleep(delay);
         }
       } catch (error) {
         console.error(`Error executing ${agentName}:`, error.message);
@@ -134,8 +119,9 @@ class ChiefOfStaffAgent {
         
         // Still add delay even on error
         if (i < this.agents.length - 1) {
-          console.log('Waiting 3 seconds before next agent...\n');
-          await this.sleep(3000);
+          const delay = AGENT_EXECUTION.DELAY_BETWEEN_AGENTS_ON_ERROR;
+          console.log(`Waiting ${delay / 1000} seconds before next agent...\n`);
+          await this.sleep(delay);
         }
       }
     }
@@ -174,8 +160,9 @@ class ChiefOfStaffAgent {
         
         // Add delay between agents (except after the last one) to help with rate limits
         if (i < validAgents.length - 1) {
-          console.log('Waiting 3 seconds before next agent...\n');
-          await this.sleep(3000);
+          const delay = AGENT_EXECUTION.DELAY_FOR_SPECIFIC_AGENTS;
+          console.log(`Waiting ${delay / 1000} seconds before next agent...\n`);
+          await this.sleep(delay);
         }
       } catch (error) {
         console.error(`Error executing ${agentName}:`, error.message);
@@ -184,11 +171,12 @@ class ChiefOfStaffAgent {
           success: false,
           error: error.message
         });
-        
+
         // Still add delay even on error
         if (i < validAgents.length - 1) {
-          console.log('Waiting 3 seconds before next agent...\n');
-          await this.sleep(3000);
+          const delay = AGENT_EXECUTION.DELAY_FOR_SPECIFIC_AGENTS;
+          console.log(`Waiting ${delay / 1000} seconds before next agent...\n`);
+          await this.sleep(delay);
         }
       }
     }
@@ -259,166 +247,26 @@ class ChiefOfStaffAgent {
 const args = process.argv.slice(2);
 
 if (args.includes('--help') || args.includes('-h')) {
-  console.log(`
-Chief of Staff Agent System
-
-Usage:
-  npm start                                          Run all agents
-  npm start -- agent1 agent2                        Run specific agents
-  npm start -- --start-date YYYY-MM-DD --end-date YYYY-MM-DD   Run with custom date range
-  npm start -- agent1 agent2 --start-date YYYY-MM-DD --end-date YYYY-MM-DD
-  npm start -- --list                                List available agents
-  npm start -- --help                                Show this help
-
-Options:
-  --start-date YYYY-MM-DD           Start date for data analysis (default: configured days ago, see config.json settings.defaultDays)
-  --end-date YYYY-MM-DD             End date for data analysis (default: today)
-  --slack-user-id USER_ID           Slack user ID for slack-user-analysis agent (required when running slack-user-analysis)
-  --manual-sources-folder FOLDER    Folder within manual_sources to use for business-health agent (e.g., "Week 1", "Week 2", "planning")
-  
-Note: When using npm, you MUST use '--' before any arguments
-
-Available Agents:
-  - weekly-recap              Weekly team catch-up and recap
-  - business-health           Officevibe business and product health
-  - product-engineering       Product development and engineering updates
-  - okr-progress             OKR updates and progress tracking
-  - quarterly-review         Quarterly review of product releases and OKR updates
-  - thoughtleadership-updates Product thought leadership and new topics
-  - slack-user-analysis      Analyze a Slack user's contributions and communication patterns
-
-Examples:
-  npm start
-  npm start -- weekly-recap business-health
-  npm start -- --start-date 2025-12-20 --end-date 2025-12-27
-  npm start -- weekly-recap --start-date 2025-12-20 --end-date 2025-12-27
-  npm start -- slack-user-analysis --slack-user-id U01234567AB
-  npm start -- business-health --manual-sources-folder "Week 1"
-  npm start -- business-health --manual-sources-folder "Week 2" --start-date 2025-12-20 --end-date 2025-12-27
-  npm start -- --list
-`);
+  displayHelp();
   process.exit(0);
 }
 
-// Parse date range arguments
-function parseDateRange(args) {
-  let startDate = null;
-  let endDate = null;
-  
-  const startDateIndex = args.indexOf('--start-date');
-  const endDateIndex = args.indexOf('--end-date');
-  
-  if (startDateIndex !== -1 && args[startDateIndex + 1]) {
-    startDate = args[startDateIndex + 1];
-    // Validate date format YYYY-MM-DD
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
-      console.error('Error: --start-date must be in YYYY-MM-DD format (e.g., 2025-12-20)');
-      process.exit(1);
-    }
-    // Validate it's a valid date
-    const startDateObj = new Date(startDate + 'T00:00:00');
-    if (isNaN(startDateObj.getTime())) {
-      console.error('Error: --start-date must be a valid date');
-      process.exit(1);
-    }
-  }
-  
-  if (endDateIndex !== -1 && args[endDateIndex + 1]) {
-    endDate = args[endDateIndex + 1];
-    // Validate date format YYYY-MM-DD
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-      console.error('Error: --end-date must be in YYYY-MM-DD format (e.g., 2025-12-27)');
-      process.exit(1);
-    }
-    // Validate it's a valid date
-    const endDateObj = new Date(endDate + 'T00:00:00');
-    if (isNaN(endDateObj.getTime())) {
-      console.error('Error: --end-date must be a valid date');
-      process.exit(1);
-    }
-  }
-  
-  // Validate that start date is before end date if both are provided
-  if (startDate && endDate) {
-    const startDateObj = new Date(startDate + 'T00:00:00');
-    const endDateObj = new Date(endDate + 'T00:00:00');
-    if (startDateObj > endDateObj) {
-      console.error('Error: --start-date must be before or equal to --end-date');
-      process.exit(1);
-    }
-  }
-  
-  if (startDate || endDate) {
-    return { startDate, endDate };
-  }
-  
-  return null;
+// Parse CLI arguments using the new parser
+let parsed;
+try {
+  parsed = parseCliArguments(args);
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
 }
 
-// Parse agent parameters (like --slack-user-id, --manual-sources-folder)
-function parseAgentParams(args) {
-  const params = {};
-  const slackUserIdIndex = args.indexOf('--slack-user-id');
-  const manualSourcesFolderIndex = args.indexOf('--manual-sources-folder');
-  
-  if (slackUserIdIndex !== -1 && args[slackUserIdIndex + 1]) {
-    params.slackUserId = args[slackUserIdIndex + 1];
-    // Validate format (should start with U and be alphanumeric)
-    if (!/^U[A-Z0-9]+$/i.test(params.slackUserId)) {
-      console.warn(`Warning: Slack user ID "${params.slackUserId}" doesn't match expected format (should be like U01234567AB)`);
-    }
-  }
-  
-  if (manualSourcesFolderIndex !== -1 && args[manualSourcesFolderIndex + 1]) {
-    params.manualSourcesFolder = args[manualSourcesFolderIndex + 1];
-  }
-  
-  return params;
-}
+const { dateRange, agentParams, specificAgents } = parsed;
 
-// Remove date and parameter arguments from args array to get agent names
-function extractAgentNames(args) {
-  const agentNames = [];
-  let skipNext = false;
-  
-  for (let i = 0; i < args.length; i++) {
-    if (skipNext) {
-      skipNext = false;
-      continue;
-    }
-    
-    if (args[i] === '--start-date' || args[i] === '--end-date' || args[i] === '--slack-user-id' || args[i] === '--manual-sources-folder') {
-      skipNext = true;
-      continue;
-    }
-    
-    // Skip other flags but keep agent names
-    if (!args[i].startsWith('--')) {
-      agentNames.push(args[i]);
-    }
-  }
-  
-  return agentNames.length > 0 ? agentNames : null;
-}
+// Log parsed arguments for debugging
+logParsedArguments(parsed, args);
 
-const dateRange = parseDateRange(args);
-const agentParams = parseAgentParams(args);
-const specificAgents = extractAgentNames(args);
-
-// Always log parsed arguments for debugging
-console.log(`[CLI] Parsed arguments:`);
-console.log(`  - Date range: ${dateRange ? `${dateRange.startDate || 'default'} to ${dateRange.endDate || 'default'}` : 'default'}`);
-console.log(`  - Specific agents: ${specificAgents ? specificAgents.join(', ') : 'all agents'}`);
-if (Object.keys(agentParams).length > 0) {
-  console.log(`  - Agent parameters: ${JSON.stringify(agentParams)}`);
-}
-console.log(`  - Raw args: ${args.join(' ')}`);
-
-// Warn if slack-user-analysis is run without slack-user-id
-if (specificAgents && specificAgents.includes('slack-user-analysis') && !agentParams.slackUserId) {
-  console.warn(`\n⚠️  Warning: slack-user-analysis requires --slack-user-id parameter.`);
-  console.warn(`   Example: npm start -- slack-user-analysis --slack-user-id U01234567AB\n`);
-}
+// Validate agent-specific requirements
+validateAgentRequirements(specificAgents, agentParams);
 
 const agent = new ChiefOfStaffAgent(dateRange, agentParams);
 
