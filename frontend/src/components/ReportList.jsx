@@ -72,6 +72,11 @@ function ReportList({ reports, onReportSelect }) {
                 <span className="text-xs text-indigo-600 font-medium">
                   {formatDateAndTime(report)}
                 </span>
+                {report.cost !== null && report.cost !== undefined && (
+                  <span className="text-xs text-green-700 font-semibold bg-green-50 px-2 py-0.5 rounded-md border border-green-200">
+                    ${report.cost.toFixed(4)}
+                  </span>
+                )}
               </div>
               {(report.oneLineSummary || (report.insights && report.insights.length > 0)) && (
                 <p className="text-sm text-gray-700 mb-2 line-clamp-2">

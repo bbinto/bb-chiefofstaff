@@ -9,6 +9,7 @@ function App() {
   const [agents, setAgents] = useState([])
   const [selectedReport, setSelectedReport] = useState(null)
   const [selectedAgent, setSelectedAgent] = useState('all')
+  const [selectedWeek, setSelectedWeek] = useState('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -44,9 +45,38 @@ function App() {
     }
   }
 
-  const filteredReports = selectedAgent === 'all' 
-    ? reports 
-    : reports.filter(report => report.agentName === selectedAgent)
+  // Helper function to get ISO week number
+  const getWeekNumber = (date) => {
+    const d = new Date(date)
+    d.setHours(0, 0, 0, 0)
+    d.setDate(d.getDate() + 4 - (d.getDay() || 7))
+    const yearStart = new Date(d.getFullYear(), 0, 1)
+    const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7)
+    return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`
+  }
+
+  // Helper function to format week for display
+  const formatWeekDisplay = (weekStr) => {
+    const [year, week] = weekStr.split('-W')
+    return `Week ${week}, ${year}`
+  }
+
+  // Get unique weeks from reports
+  const weeks = [...new Set(reports.map(report => getWeekNumber(report.timestamp)))]
+    .sort()
+    .reverse()
+
+  // Filter reports by agent and week
+  const filteredReports = reports.filter(report => {
+    const matchesAgent = selectedAgent === 'all' || report.agentName === selectedAgent
+    const matchesWeek = selectedWeek === 'all' || getWeekNumber(report.timestamp) === selectedWeek
+    return matchesAgent && matchesWeek
+  })
+
+  // Calculate total cost for filtered reports
+  const totalCost = filteredReports.reduce((sum, report) => {
+    return sum + (report.cost || 0)
+  }, 0)
 
   const handleReportSelect = (report) => {
     setSelectedReport(report)
@@ -135,7 +165,12 @@ function App() {
               agents={agents}
               selectedAgent={selectedAgent}
               onAgentChange={setSelectedAgent}
+              weeks={weeks}
+              selectedWeek={selectedWeek}
+              onWeekChange={setSelectedWeek}
+              formatWeekDisplay={formatWeekDisplay}
               reportCount={filteredReports.length}
+              totalCost={totalCost}
             />
             <ReportList
               reports={filteredReports}

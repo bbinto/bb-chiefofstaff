@@ -8,15 +8,20 @@ import { parseDateRangeFromArgs } from './date-utils.js';
 /**
  * Parse agent parameters from command line arguments
  * @param {string[]} args - Command line arguments
- * @returns {{slackUserId?: string, manualSourcesFolder?: string}} Parsed agent parameters
+ * @returns {{slackUserId?: string, manualSourcesFolder?: string, folder?: string}} Parsed agent parameters
  */
 export function parseAgentParams(args) {
+  console.log('[CLI Parser] Parsing agent parameters from args:', args);
   const params = {};
   const slackUserIdIndex = args.indexOf('--slack-user-id');
   const manualSourcesFolderIndex = args.indexOf('--manual-sources-folder');
+  const folderIndex = args.indexOf('--folder');
+
+  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex);
 
   if (slackUserIdIndex !== -1 && args[slackUserIdIndex + 1]) {
     params.slackUserId = args[slackUserIdIndex + 1];
+    console.log('[CLI Parser] Found slackUserId:', params.slackUserId);
     // Validate format (should start with U and be alphanumeric)
     if (!/^U[A-Z0-9]+$/i.test(params.slackUserId)) {
       console.warn(
@@ -27,8 +32,17 @@ export function parseAgentParams(args) {
 
   if (manualSourcesFolderIndex !== -1 && args[manualSourcesFolderIndex + 1]) {
     params.manualSourcesFolder = args[manualSourcesFolderIndex + 1];
+    console.log('[CLI Parser] Found manualSourcesFolder:', params.manualSourcesFolder);
   }
 
+  if (folderIndex !== -1 && args[folderIndex + 1]) {
+    params.folder = args[folderIndex + 1];
+    console.log('[CLI Parser] Found folder parameter:', params.folder);
+  } else {
+    console.log('[CLI Parser] No folder parameter found in args');
+  }
+
+  console.log('[CLI Parser] Final parsed params:', params);
   return params;
 }
 
@@ -46,7 +60,8 @@ export function extractAgentNames(args) {
     '--start-date',
     '--end-date',
     '--slack-user-id',
-    '--manual-sources-folder'
+    '--manual-sources-folder',
+    '--folder'
   ];
 
   for (let i = 0; i < args.length; i++) {
@@ -106,6 +121,7 @@ Options:
   --end-date YYYY-MM-DD             End date for data analysis (default: today)
   --slack-user-id USER_ID           Slack user ID for slack-user-analysis agent (required when running slack-user-analysis)
   --manual-sources-folder FOLDER    Folder within manual_sources to use for business-health agent (e.g., "Week 1", "Week 2", "planning")
+  --folder FOLDER                   Folder within manual_sources to use for telemetry-deepdive agent (e.g., "week1", "week2")
 
 Note: When using npm, you MUST use '--' before any arguments
 
@@ -126,6 +142,8 @@ Examples:
   npm start -- slack-user-analysis --slack-user-id U01234567AB
   npm start -- business-health --manual-sources-folder "Week 1"
   npm start -- business-health --manual-sources-folder "Week 2" --start-date 2025-12-20 --end-date 2025-12-27
+  npm start -- telemetry-deepdive --folder week1
+  npm start -- telemetry-deepdive --folder week2
   npm start -- --list
 `);
 }

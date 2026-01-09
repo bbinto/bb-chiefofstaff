@@ -9,6 +9,7 @@ function ReportViewer({ report, onBack }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [exporting, setExporting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     fetchReportContent()
@@ -60,6 +61,45 @@ function ReportViewer({ report, onBack }) {
     } catch (err) {
       console.error('Failed to export to Slack format:', err)
       alert('Failed to export to Slack format. Please try again.')
+    }
+  }
+
+  const handleDelete = async () => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete this report?\n\n${report.filename}\n\nThis action cannot be undone.`
+    )
+
+    if (!confirmed) return
+
+    try {
+      setDeleting(true)
+      const response = await fetch(`http://localhost:3001/api/reports/${encodeURIComponent(report.filename)}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        // Try to parse as JSON, but handle HTML responses
+        const contentType = response.headers.get('content-type')
+        if (contentType && contentType.includes('application/json')) {
+          const data = await response.json()
+          throw new Error(data.error || 'Failed to delete report')
+        } else {
+          const text = await response.text()
+          console.error('Server returned non-JSON response:', text)
+          throw new Error(`Failed to delete report: ${response.status} ${response.statusText}`)
+        }
+      }
+
+      alert('Report deleted successfully!')
+      onBack() // Navigate back to report list
+    } catch (err) {
+      console.error('Failed to delete report:', err)
+      alert(`Failed to delete report: ${err.message}`)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -153,6 +193,26 @@ function ReportViewer({ report, onBack }) {
               </svg>
               Copy for Slack
             </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 rounded-lg transition-all duration-200 font-medium shadow-sm hover:shadow-md text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+              {deleting ? 'Deleting...' : 'Delete Report'}
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-[0.625rem] font-bold bg-gradient-to-r ${getAgentColor(report.agentName)} text-white shadow-sm`}>
@@ -164,7 +224,7 @@ function ReportViewer({ report, onBack }) {
           </div>
         </div>
         <h2 className="text-lg font-bold text-gray-900 mt-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
-          {report.filename}
+          Filename: {report.filename}
         </h2>
       </div>
 

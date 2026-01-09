@@ -22,10 +22,11 @@ import {
  */
 export class AgentRunner {
   constructor(mcpClient, config, dateRange = null, agentParams = {}) {
+    console.log('[AgentRunner] Constructor called with agentParams:', agentParams);
     this.mcpClient = mcpClient;
     this.config = config;
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
-    this.agentParams = agentParams; // { slackUserId: 'U...' } for slack-user-analysis
+    this.agentParams = agentParams; // { slackUserId: 'U...', folder: 'week1', etc. }
     this.anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY
     });
@@ -157,10 +158,22 @@ export class AgentRunner {
         parameterMessage = `\n\n**IMPORTANT: Slack User ID Parameter Required**\nNo Slack user ID was provided. Please ask the user for the Slack user ID before proceeding with the analysis. The Slack user ID format is typically "U" followed by alphanumeric characters (e.g., "U01234567AB").`;
       }
     }
-    
+
     if (agentName === 'business-health') {
       if (this.agentParams.manualSourcesFolder) {
         parameterMessage = `\n\n**IMPORTANT: Manual Sources Folder Parameter**\nThe folder to use for manual sources is: "${this.agentParams.manualSourcesFolder}"\nPlease use files from the "${this.agentParams.manualSourcesFolder}" subfolder within manual_sources. When using the read_file_from_manual_sources tool, specify filenames relative to this folder (e.g., if folder is "Week 1" and file is "ARR OV.xlsx", use filename "ARR OV.xlsx" or "Week 1/ARR OV.xlsx").`;
+      }
+    }
+
+    if (agentName === 'telemetry-deepdive') {
+      console.log('[AgentRunner] Processing telemetry-deepdive agent. this.agentParams:', this.agentParams);
+      console.log('[AgentRunner] this.agentParams.folder value:', this.agentParams.folder);
+      if (this.agentParams.folder) {
+        console.log('[AgentRunner] ✅ Folder parameter found! Setting parameter message for folder:', this.agentParams.folder);
+        parameterMessage = `\n\n**IMPORTANT: Folder Parameter**\nThe folder parameter has been set to: "${this.agentParams.folder}"\nYou MUST only analyze files from the "${this.agentParams.folder}" subfolder within manual_sources. Do NOT explore other subfolders or use list_manual_sources_files to browse. Only read files from "${this.agentParams.folder}/" when using the read_file_from_manual_sources tool.`;
+        console.log('[AgentRunner] Parameter message created:', parameterMessage);
+      } else {
+        console.log('[AgentRunner] ❌ No folder parameter found in this.agentParams');
       }
     }
 
@@ -262,6 +275,10 @@ export class AgentRunner {
       // Include agent-specific parameters in result for reporting
       if (agentName === 'business-health' && this.agentParams.manualSourcesFolder) {
         result.manualSourcesFolder = this.agentParams.manualSourcesFolder;
+      }
+      if (agentName === 'telemetry-deepdive' && this.agentParams.folder) {
+        result.folder = this.agentParams.folder;
+        console.log("---------folder selected--------:" + this.agentParams.folder)
       }
       
       return result;

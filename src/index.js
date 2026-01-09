@@ -14,13 +14,14 @@ import { AGENT_EXECUTION } from './utils/constants.js';
  */
 class ChiefOfStaffAgent {
   constructor(dateRange = null, agentParams = {}) {
+    console.log('[ChiefOfStaffAgent] Constructor called with agentParams:', agentParams);
     this.mcpClient = null;
     this.configManager = new ConfigManager();
     this.config = null;
     this.agentRunner = null;
     this.reportGenerator = new ReportGenerator();
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
-    this.agentParams = agentParams; // { slackUserId: 'U...' } for slack-user-analysis
+    this.agentParams = agentParams; // { slackUserId: 'U...', folder: 'week1', etc. }
 
     // Define agent execution order
     this.agents = [
@@ -69,6 +70,7 @@ class ChiefOfStaffAgent {
     await this.mcpClient.initialize();
 
     // Initialize agent runner
+    console.log('[ChiefOfStaffAgent] Initializing AgentRunner with agentParams:', this.agentParams);
     this.agentRunner = new AgentRunner(this.mcpClient, this.config, this.dateRange, this.agentParams);
 
     console.log('\nInitialization complete!\n');
@@ -264,6 +266,8 @@ const { dateRange, agentParams, specificAgents } = parsed;
 
 // Log parsed arguments for debugging
 logParsedArguments(parsed, args);
+
+console.log('[Main] Creating ChiefOfStaffAgent with dateRange:', dateRange, 'and agentParams:', agentParams);
 
 // Validate agent-specific requirements
 validateAgentRequirements(specificAgents, agentParams);

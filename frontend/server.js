@@ -72,6 +72,9 @@ app.get('/', (req, res) => {
           <strong>GET</strong> <code>/api/reports/:filename</code> - Get a specific report
         </div>
         <div class="endpoint">
+          <strong>DELETE</strong> <code>/api/reports/:filename</code> - Delete a specific report
+        </div>
+        <div class="endpoint">
           <strong>GET</strong> <code>/api/agents</code> - Get unique agent names
         </div>
         
@@ -87,6 +90,19 @@ app.get('/', (req, res) => {
 });
 
 // Extraction functions now imported from ../src/utils/summary-extractor.js
+
+/**
+ * Extract cost from report content
+ * Looks for pattern: **Cost**: $X.XXXX
+ */
+function extractCost(content) {
+  const costRegex = /\*\*Cost\*\*:\s*\$(\d+\.\d+)/;
+  const match = content.match(costRegex);
+  if (match && match[1]) {
+    return parseFloat(match[1]);
+  }
+  return null;
+}
 
 // Get all reports
 app.get('/api/reports', (req, res) => {
@@ -125,9 +141,10 @@ app.get('/api/reports', (req, res) => {
           agentName = file.replace('.md', '').toLowerCase().replace(/\s+/g, '-');
         }
         
-        // Read file content to extract one-line summary and insights
+        // Read file content to extract one-line summary, insights, and cost
         let oneLineSummary = null;
         let insights = [];
+        let cost = null;
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
           oneLineSummary = extractOneLineSummary(content);
@@ -135,6 +152,8 @@ app.get('/api/reports', (req, res) => {
           if (!oneLineSummary) {
             insights = extractInsights(content);
           }
+          // Extract cost from content
+          cost = extractCost(content);
         } catch (err) {
           console.error(`Error reading ${file} for summary:`, err.message);
         }
@@ -148,7 +167,8 @@ app.get('/api/reports', (req, res) => {
           time: timestamp.toLocaleTimeString(),
           size: stats.size,
           oneLineSummary,
-          insights
+          insights,
+          cost
         };
       })
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -178,6 +198,35 @@ app.get('/api/reports/:filename', (req, res) => {
   }
 });
 
+// Delete a specific report
+app.delete('/api/reports/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    console.log(`DELETE request received for: ${filename}`);
+    const filePath = path.join(REPORTS_DIR, filename);
+    console.log(`Resolved file path: ${filePath}`);
+
+    // Security check: ensure the filename doesn't contain path traversal
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      console.error('Invalid filename detected:', filename);
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    if (!fs.existsSync(filePath)) {
+      console.error('File not found:', filePath);
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // Delete the file
+    fs.unlinkSync(filePath);
+    console.log('File deleted successfully:', filePath);
+    res.json({ success: true, message: 'Report deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting report:', error);
+    res.status(500).json({ error: 'Failed to delete report', details: error.message });
+  }
+});
+
 // Get unique agent names
 app.get('/api/agents', (req, res) => {
   try {
@@ -187,7 +236,7 @@ app.get('/api/agents', (req, res) => {
 
     const files = fs.readdirSync(REPORTS_DIR);
     const agents = new Set();
-    
+
     files
       .filter(file => file.endsWith('.md'))
       .forEach(file => {
@@ -200,7 +249,7 @@ app.get('/api/agents', (req, res) => {
           agents.add(agentName);
         }
       });
-    
+
     res.json(Array.from(agents).sort());
   } catch (error) {
     console.error('Error reading agents:', error);
