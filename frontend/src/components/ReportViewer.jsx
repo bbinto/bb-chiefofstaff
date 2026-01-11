@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { markdownToSlack } from 'md-to-slack'
 import { exportToPDF } from '../utils/pdfExport'
 
-function ReportViewer({ report, onBack }) {
+function ReportViewer({ report, onBack, password }) {
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -18,7 +18,8 @@ function ReportViewer({ report, onBack }) {
   const fetchReportContent = async () => {
     try {
       setLoading(true)
-      const response = await fetch(`http://localhost:3001/api/reports/${report.filename}`)
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`http://localhost:3001/api/reports/${report.filename}`, { headers })
       if (!response.ok) throw new Error('Failed to fetch report content')
       const data = await response.json()
       setContent(data.content)
@@ -73,11 +74,15 @@ function ReportViewer({ report, onBack }) {
 
     try {
       setDeleting(true)
+      const headers = {
+        'Content-Type': 'application/json',
+      }
+      if (password) {
+        headers['x-app-password'] = password
+      }
       const response = await fetch(`http://localhost:3001/api/reports/${encodeURIComponent(report.filename)}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
       })
 
       if (!response.ok) {

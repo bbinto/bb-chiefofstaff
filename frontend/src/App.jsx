@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react'
 import ReportList from './components/ReportList'
 import ReportViewer from './components/ReportViewer'
 import FilterBar from './components/FilterBar'
+import Login from './components/Login'
+import AgentRunner from './components/AgentRunner'
+import Analytics from './components/Analytics'
 import mariLogo from './img/mari-128.png'
 
 function App() {
@@ -12,16 +15,55 @@ function App() {
   const [selectedWeek, setSelectedWeek] = useState('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [password, setPassword] = useState(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [showAgentRunner, setShowAgentRunner] = useState(false)
+  const [showAnalytics, setShowAnalytics] = useState(false)
 
   useEffect(() => {
-    fetchReports()
-    fetchAgents()
+    // Check if password is stored in sessionStorage
+    const storedPassword = sessionStorage.getItem('appPassword')
+    if (storedPassword) {
+      setPassword(storedPassword)
+      setIsAuthenticated(true)
+    } else {
+      setLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    if (isAuthenticated && password) {
+      fetchReports()
+      fetchAgents()
+    }
+  }, [isAuthenticated, password])
+
+  const handleLogin = (pass) => {
+    setPassword(pass)
+    setIsAuthenticated(true)
+    sessionStorage.setItem('appPassword', pass)
+  }
+
+  const handleLogout = () => {
+    setPassword(null)
+    setIsAuthenticated(false)
+    sessionStorage.removeItem('appPassword')
+    setReports([])
+    setAgents([])
+    setSelectedReport(null)
+  }
 
   const fetchReports = async () => {
     try {
       setLoading(true)
-      const response = await fetch('http://localhost:3001/api/reports')
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch('http://localhost:3001/api/reports', { headers })
+
+      if (response.status === 401) {
+        handleLogout()
+        throw new Error('Authentication failed')
+      }
+
       if (!response.ok) throw new Error('Failed to fetch reports')
       const data = await response.json()
       setReports(data)
@@ -36,7 +78,14 @@ function App() {
 
   const fetchAgents = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/agents')
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch('http://localhost:3001/api/agents', { headers })
+
+      if (response.status === 401) {
+        handleLogout()
+        throw new Error('Authentication failed')
+      }
+
       if (!response.ok) throw new Error('Failed to fetch agents')
       const data = await response.json()
       setAgents(data)
@@ -86,6 +135,10 @@ function App() {
     setSelectedReport(null)
   }
 
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} />
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
@@ -126,6 +179,15 @@ function App() {
               </div>
             </div>
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => setShowAgentRunner(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span className="font-medium text-sm">Run Agents</span>
+              </button>
               <a
                 href="https://github.com/bbinto/bb-chiefofstaff"
                 target="_blank"
@@ -148,6 +210,16 @@ function App() {
                 </svg>
                 <span className="font-medium text-sm">Blog Post</span>
               </a>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+                title="Sign out"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                <span className="font-medium text-sm">Sign Out</span>
+              </button>
             </div>
           </div>
         </div>
@@ -155,9 +227,10 @@ function App() {
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         {selectedReport ? (
-          <ReportViewer 
-            report={selectedReport} 
+          <ReportViewer
+            report={selectedReport}
             onBack={handleBack}
+            password={password}
           />
         ) : (
           <>
@@ -179,6 +252,13 @@ function App() {
           </>
         )}
       </div>
+
+      {showAgentRunner && (
+        <AgentRunner
+          password={password}
+          onClose={() => setShowAgentRunner(false)}
+        />
+      )}
     </div>
   )
 }

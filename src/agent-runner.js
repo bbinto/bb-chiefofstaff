@@ -4,7 +4,7 @@ import path from 'path';
 import { RateLimiter } from './agent/rate-limiter.js';
 import { MessageTruncator } from './agent/message-truncator.js';
 import { ToolHandler } from './agent/tool-handler.js';
-import { calculateDateRange, formatDateRangeDisplay } from './utils/date-utils.js';
+import { calculateDateRange, formatDateRangeDisplay, parseCalendarWeek, getCalendarWeekDateRange } from './utils/date-utils.js';
 import {
   API_DEFAULTS,
   PATHS,
@@ -177,6 +177,35 @@ export class AgentRunner {
       }
     }
 
+    if (agentName === '1-1') {
+      if (this.agentParams.email) {
+        parameterMessage = `\n\n**IMPORTANT: Email Parameter**\nThe email address for the 1-1 person is: ${this.agentParams.email}\nPlease use this email to find the person in config.team["1-1s"] and gather their information (name, role, relationship type, Slack ID, Slack DM channel ID) to prepare for the 1-1 meeting.`;
+      } else {
+        parameterMessage = `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the 1-1 person before proceeding. The email must match someone in config.team["1-1s"].`;
+      }
+    }
+
+    if (agentName === 'weekly-executive-summary') {
+      console.log('[AgentRunner] Processing weekly-executive-summary agent. this.agentParams:', this.agentParams);
+      console.log('[AgentRunner] this.agentParams.week value:', this.agentParams.week);
+      if (this.agentParams.week) {
+        console.log('[AgentRunner] ✅ Week parameter found! Setting parameter message for week:', this.agentParams.week);
+        // Parse week to get date range for context
+        const weekInfo = parseCalendarWeek(this.agentParams.week);
+        if (weekInfo) {
+          const dateRange = getCalendarWeekDateRange(weekInfo.week, weekInfo.year);
+          parameterMessage = `\n\n**IMPORTANT: Calendar Week Parameter**\nThe calendar week parameter has been set to: "${this.agentParams.week}" (Week ${weekInfo.week}, ${weekInfo.year})\nThe date range for this week is: ${dateRange.startDate} (Monday) to ${dateRange.endDate} (Sunday).\nYou MUST find all report files created during this week (where the date portion YYYY-MM-DD in the filename falls within ${dateRange.startDate} to ${dateRange.endDate}). Use the list_reports_in_week tool to find reports for this week, then use read_report_file to extract "One-Line Executive Summary" and "tl;dr" sections from each report.`;
+          console.log('[AgentRunner] Parameter message created with date range:', dateRange);
+        } else {
+          parameterMessage = `\n\n**IMPORTANT: Invalid Week Parameter**\nThe week parameter "${this.agentParams.week}" is invalid. Expected format: "week 1" or "week 1 2025". Please inform the user to provide a valid week parameter.`;
+          console.log('[AgentRunner] ❌ Invalid week parameter format');
+        }
+      } else {
+        console.log('[AgentRunner] ❌ No week parameter found in this.agentParams');
+        parameterMessage = `\n\n**IMPORTANT: Week Parameter Required**\nNo calendar week was provided. Please ask the user for the calendar week (e.g., "week 1" or "week 1 2025") before proceeding. The week format should be "week N" or "week N YYYY" where N is the week number (1-53) and YYYY is the year (if not provided, current year is assumed).`;
+      }
+    }
+
     const messages = [
       {
         role: 'user',
@@ -211,7 +240,9 @@ export class AgentRunner {
             
             // Check if it's a custom filesystem tool
             if (toolUse.name === 'read_file_from_manual_sources' || 
-                toolUse.name === 'list_manual_sources_files') {
+                toolUse.name === 'list_manual_sources_files' ||
+                toolUse.name === 'list_reports_in_week' ||
+                toolUse.name === 'read_report_file') {
               toolResult = await this.handleCustomTool(toolUse.name, toolUse.input);
             } else {
               // Use MCP client for other tools
@@ -390,6 +421,10 @@ export class AgentRunner {
 
     const dateRangeText = `Start: ${startDateISO} | End: ${endDateISO}${threeDaysAgoISO ? ` | 3d ago from end: ${threeDaysAgoISO}` : ''}`;
     const calendarNames = (this.config.calendar?.name || []).join(', ');
+    const oneOnOnes = (this.config.team?.["1-1s"] || []).map(p => 
+      `${p.name} (${p.email}, Role: ${p.role}, Relationship: ${p.relationship}, Slack: ${p.slackId}, DM: ${p.slackDMs || 'N/A'})`
+    ).join('; ');
+    const oneOnOneChannelTopics = (this.config.team?.["1-1-channelsTopics"] || []).join(', ');
 
     return `# Configuration (Concise Format)
 
@@ -401,6 +436,11 @@ PMs: ${teamPMs}
 Jira Teams: ${jiraTeams}
 Jira Products: ${jiraProducts}
 OV Entire Team: ${ovEntireTeam}
+
+## 1-1 People
+1-1s: ${oneOnOnes || 'None'}
+1-1 Channel Topics: ${oneOnOneChannelTopics || 'None'}
+**IMPORTANT: 1-1 channel values are Slack channel IDs. Use these IDs directly in MCP tool calls.**
 
 ## Calendar
 Calendar Names: ${calendarNames || 'None'}

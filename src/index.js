@@ -35,9 +35,12 @@ class ChiefOfStaffAgent {
       'okr-progress',
       'productivity-weekly-tracker',
       'quarterly-review',
+      'quarterly-performance-review',
       'thoughtleadership-updates',
       'officevibe-strategy-roadmap',
-      'slack-user-analysis'
+      'slack-user-analysis',
+      '1-1',
+      'weekly-executive-summary'
     ];
   }
 

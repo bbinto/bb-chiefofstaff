@@ -8,6 +8,7 @@ import path from 'path';
 import XLSX from 'xlsx';
 import pdfParse from 'pdf-parse';
 import { PATHS, FRONTEND } from '../utils/constants.js';
+import { parseCalendarWeek, getCalendarWeekDateRange } from '../utils/date-utils.js';
 
 /**
  * Tool Handler Class
@@ -23,7 +24,7 @@ export class ToolHandler {
    * @returns {Array} Array of tool schemas
    */
   buildCustomToolsSchema() {
-    return [
+    const tools = [
       {
         name: 'read_file_from_manual_sources',
         description:
@@ -51,6 +52,38 @@ export class ToolHandler {
         }
       }
     ];
+
+    // Add report file tools (for weekly-executive-summary agent)
+    tools.push(
+      {
+        name: 'list_reports_in_week',
+        description:
+          'List all report files in the reports directory that were created during a specific calendar week. The week parameter must be provided in agent parameters (e.g., "week 1" or "week 1 2025"). Reports are named with format: {report-name}-{YYYY-MM-DD}-{HH-MM-SS}.md. Returns files where the date portion falls within the specified week\'s date range (Monday to Sunday).',
+        input_schema: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      },
+      {
+        name: 'read_report_file',
+        description:
+          'Read a report file from the reports directory. Report files are markdown files containing agent outputs. Use this to extract "One-Line Executive Summary" and "tl;dr" sections from reports.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            filename: {
+              type: 'string',
+              description:
+                'The name of the report file to read from the reports directory, e.g., "weekly-report-2025-01-06-14-30-00.md"'
+            }
+          },
+          required: ['filename']
+        }
+      }
+    );
+
+    return tools;
   }
 
   /**
@@ -66,6 +99,14 @@ export class ToolHandler {
 
     if (toolName === 'list_manual_sources_files') {
       return this.listManualSourcesFiles();
+    }
+
+    if (toolName === 'list_reports_in_week') {
+      return this.listReportsInWeek();
+    }
+
+    if (toolName === 'read_report_file') {
+      return this.readReportFile(args);
     }
 
     throw new Error(`Unknown custom tool: ${toolName}`);
@@ -332,5 +373,123 @@ export class ToolHandler {
     }
 
     return directories;
+  }
+
+  /**
+   * List report files created during the specified calendar week
+   * @returns {object} List of report files with metadata
+   */
+  listReportsInWeek() {
+    const reportsPath = path.resolve(process.cwd(), PATHS.REPORTS_DIR);
+
+    if (!fs.existsSync(reportsPath)) {
+      return {
+        error: 'reports folder does not exist',
+        path: reportsPath
+      };
+    }
+
+    if (!this.agentParams.week) {
+      return {
+        error: 'Week parameter is required. Please provide --week parameter (e.g., "week 1" or "week 1 2025")'
+      };
+    }
+
+    // Parse week parameter and get date range
+    const weekInfo = parseCalendarWeek(this.agentParams.week);
+    
+    if (!weekInfo) {
+      return {
+        error: `Invalid week parameter: "${this.agentParams.week}". Expected format: "week 1" or "week 1 2025"`,
+        provided: this.agentParams.week
+      };
+    }
+
+    const dateRange = getCalendarWeekDateRange(weekInfo.week, weekInfo.year);
+    
+    // Read all files in reports directory
+    const files = fs.readdirSync(reportsPath);
+    const reportFiles = [];
+
+    for (const file of files) {
+      const filePath = path.join(reportsPath, file);
+      const stats = fs.statSync(filePath);
+
+      // Only process markdown files
+      if (!file.endsWith('.md')) {
+        continue;
+      }
+
+      // Extract date from filename: {name}-{YYYY-MM-DD}-{HH-MM-SS}.md
+      const dateMatch = file.match(/(\d{4}-\d{2}-\d{2})/);
+      if (!dateMatch) {
+        continue;
+      }
+
+      const fileDate = dateMatch[1];
+
+      // Check if file date falls within the week's date range
+      // Exclude weekly-executive-summary reports (they shouldn't include themselves)
+      if (fileDate >= dateRange.startDate && fileDate <= dateRange.endDate && 
+          !file.includes('weekly-executive-summary')) {
+        reportFiles.push({
+          filename: file,
+          date: fileDate,
+          modified: stats.mtime.toISOString(),
+          size: stats.size
+        });
+      }
+    }
+
+    // Sort by date (oldest first)
+    reportFiles.sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      week: `Week ${weekInfo.week}, ${weekInfo.year}`,
+      dateRange: `${dateRange.startDate} to ${dateRange.endDate}`,
+      reports: reportFiles,
+      totalReports: reportFiles.length
+    };
+  }
+
+  /**
+   * Read a report file from the reports directory
+   * @param {object} args - Tool arguments with filename
+   * @returns {object} Report file content
+   */
+  readReportFile(args) {
+    const reportsPath = path.resolve(process.cwd(), PATHS.REPORTS_DIR);
+    const filePath = path.join(reportsPath, args.filename);
+
+    // Security: ensure the file is within reports directory
+    const resolvedReportsPath = path.resolve(reportsPath);
+    if (!filePath.startsWith(resolvedReportsPath + path.sep) && filePath !== resolvedReportsPath) {
+      throw new Error('Invalid file path: file must be in reports folder');
+    }
+
+    if (!fs.existsSync(filePath)) {
+      return {
+        error: `Report file not found: ${args.filename}`,
+        hint: 'Use list_reports_in_week to see available report files for the specified week'
+      };
+    }
+
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      const stats = fs.statSync(filePath);
+
+      return {
+        filename: args.filename,
+        type: 'Report file',
+        modified: stats.mtime.toISOString(),
+        size: stats.size,
+        content: content
+      };
+    } catch (error) {
+      return {
+        error: `Error reading report file: ${error.message}`,
+        filename: args.filename
+      };
+    }
   }
 }

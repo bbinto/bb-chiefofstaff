@@ -8,7 +8,7 @@ import { parseDateRangeFromArgs } from './date-utils.js';
 /**
  * Parse agent parameters from command line arguments
  * @param {string[]} args - Command line arguments
- * @returns {{slackUserId?: string, manualSourcesFolder?: string, folder?: string}} Parsed agent parameters
+ * @returns {{slackUserId?: string, manualSourcesFolder?: string, folder?: string, email?: string, week?: string}} Parsed agent parameters
  */
 export function parseAgentParams(args) {
   console.log('[CLI Parser] Parsing agent parameters from args:', args);
@@ -16,8 +16,10 @@ export function parseAgentParams(args) {
   const slackUserIdIndex = args.indexOf('--slack-user-id');
   const manualSourcesFolderIndex = args.indexOf('--manual-sources-folder');
   const folderIndex = args.indexOf('--folder');
+  const emailIndex = args.indexOf('--email');
+  const weekIndex = args.indexOf('--week');
 
-  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex);
+  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex, 'email:', emailIndex, 'week:', weekIndex);
 
   if (slackUserIdIndex !== -1 && args[slackUserIdIndex + 1]) {
     params.slackUserId = args[slackUserIdIndex + 1];
@@ -42,6 +44,28 @@ export function parseAgentParams(args) {
     console.log('[CLI Parser] No folder parameter found in args');
   }
 
+  if (emailIndex !== -1 && args[emailIndex + 1]) {
+    params.email = args[emailIndex + 1];
+    console.log('[CLI Parser] Found email:', params.email);
+    // Basic email validation
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(params.email)) {
+      console.warn(
+        `Warning: Email "${params.email}" doesn't match expected format (should be like user@example.com)`
+      );
+    }
+  }
+
+  if (weekIndex !== -1 && args[weekIndex + 1]) {
+    params.week = args[weekIndex + 1];
+    console.log('[CLI Parser] Found week:', params.week);
+    // Basic validation - week should match pattern like "week 1" or "week 1 2025"
+    if (!/week\s+\d+(\s+\d{4})?/i.test(params.week)) {
+      console.warn(
+        `Warning: Week "${params.week}" doesn't match expected format (should be like "week 1" or "week 1 2025")`
+      );
+    }
+  }
+
   console.log('[CLI Parser] Final parsed params:', params);
   return params;
 }
@@ -61,7 +85,9 @@ export function extractAgentNames(args) {
     '--end-date',
     '--slack-user-id',
     '--manual-sources-folder',
-    '--folder'
+    '--folder',
+    '--email',
+    '--week'
   ];
 
   for (let i = 0; i < args.length; i++) {
@@ -120,19 +146,24 @@ Options:
   --start-date YYYY-MM-DD           Start date for data analysis (default: configured days ago, see config.json settings.defaultDays)
   --end-date YYYY-MM-DD             End date for data analysis (default: today)
   --slack-user-id USER_ID           Slack user ID for slack-user-analysis agent (required when running slack-user-analysis)
+  --email EMAIL                     Email address for 1-1 agent (required when running 1-1)
   --manual-sources-folder FOLDER    Folder within manual_sources to use for business-health agent (e.g., "Week 1", "Week 2", "planning")
   --folder FOLDER                   Folder within manual_sources to use for telemetry-deepdive agent (e.g., "week1", "week2")
+  --week WEEK                       Calendar week for weekly-executive-summary agent (e.g., "week 1" or "week 1 2025") (required when running weekly-executive-summary)
 
 Note: When using npm, you MUST use '--' before any arguments
 
 Available Agents:
-  - weekly-recap              Weekly team catch-up and recap
-  - business-health           Officevibe business and product health
-  - product-engineering       Product development and engineering updates
-  - okr-progress             OKR updates and progress tracking
-  - quarterly-review         Quarterly review of product releases and OKR updates
-  - thoughtleadership-updates Product thought leadership and new topics
-  - slack-user-analysis      Analyze a Slack user's contributions and communication patterns
+  - weekly-recap                    Weekly team catch-up and recap
+  - business-health                 Officevibe business and product health
+  - product-engineering             Product development and engineering updates
+  - okr-progress                    OKR updates and progress tracking
+  - quarterly-review               Quarterly review of product releases and OKR updates
+  - quarterly-performance-review   Quarterly performance review for Director of Product
+  - thoughtleadership-updates      Product thought leadership and new topics
+  - slack-user-analysis            Analyze a Slack user's contributions and communication patterns
+  - 1-1                            Prepare for a 1-1 meeting with a specific person (requires --email)
+  - weekly-executive-summary       Generate executive summary from all reports for a specific calendar week (requires --week)
 
 Examples:
   npm start
@@ -140,10 +171,13 @@ Examples:
   npm start -- --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- weekly-recap --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- slack-user-analysis --slack-user-id U01234567AB
+  npm start -- 1-1 --email lanny.geffen@workleap.com
   npm start -- business-health --manual-sources-folder "Week 1"
   npm start -- business-health --manual-sources-folder "Week 2" --start-date 2025-12-20 --end-date 2025-12-27
   npm start -- telemetry-deepdive --folder week1
   npm start -- telemetry-deepdive --folder week2
+  npm start -- weekly-executive-summary --week "week 1"
+  npm start -- weekly-executive-summary --week "week 2 2025"
   npm start -- --list
 `);
 }
@@ -185,5 +219,26 @@ export function validateAgentRequirements(specificAgents, agentParams) {
   ) {
     console.warn(`\n⚠️  Warning: slack-user-analysis requires --slack-user-id parameter.`);
     console.warn(`   Example: npm start -- slack-user-analysis --slack-user-id U01234567AB\n`);
+  }
+
+  // Warn if 1-1 is run without email
+  if (
+    specificAgents &&
+    specificAgents.includes('1-1') &&
+    !agentParams.email
+  ) {
+    console.warn(`\n⚠️  Warning: 1-1 agent requires --email parameter.`);
+    console.warn(`   Example: npm start -- 1-1 --email lanny.geffen@workleap.com\n`);
+  }
+
+  // Warn if weekly-executive-summary is run without week
+  if (
+    specificAgents &&
+    specificAgents.includes('weekly-executive-summary') &&
+    !agentParams.week
+  ) {
+    console.warn(`\n⚠️  Warning: weekly-executive-summary requires --week parameter.`);
+    console.warn(`   Example: npm start -- weekly-executive-summary --week "week 1"`);
+    console.warn(`   Example: npm start -- weekly-executive-summary --week "week 2 2025"\n`);
   }
 }

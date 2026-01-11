@@ -159,3 +159,73 @@ export function extractInsights(content) {
 
   return insights.slice(0, FRONTEND.MAX_INSIGHTS_TO_EXTRACT);
 }
+
+/**
+ * Extract "tl;dr" section(s) from report content
+ * @param {string} content - Report content
+ * @returns {string[]} Array of tl;dr content sections (empty array if not found)
+ */
+export function extractTldr(content) {
+  if (!content) return [];
+
+  const lines = content.split('\n');
+  const tldrSections = [];
+  let inTldrSection = false;
+  let currentTldr = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Look for tl;dr heading (case-insensitive, various formats)
+    if (trimmed.match(/^#{1,3}\s+.*tl[;:]?dr/i) || 
+        trimmed.match(/^#{1,3}\s+.*Executive Summary.*tl[;:]?dr/i)) {
+      // If we were already in a tl;dr section, save it before starting a new one
+      if (inTldrSection && currentTldr.length > 0) {
+        const tldrText = currentTldr.join('\n').trim();
+        if (tldrText.length > 0) {
+          tldrSections.push(tldrText);
+        }
+      }
+      
+      inTldrSection = true;
+      currentTldr = [];
+      continue;
+    }
+
+    // If we're in a tl;dr section, collect content
+    if (inTldrSection) {
+      // Stop at the next major heading (### or ## or #) that's not part of the current section
+      if (trimmed.match(/^#{1,3}\s/) && currentTldr.length > 0) {
+        // We've hit a new section, save current tl;dr and stop
+        const tldrText = currentTldr.join('\n').trim();
+        if (tldrText.length > 0) {
+          tldrSections.push(tldrText);
+        }
+        inTldrSection = false;
+        currentTldr = [];
+        continue;
+      }
+
+      // Skip empty lines at the start
+      if (currentTldr.length === 0 && trimmed.length === 0) {
+        continue;
+      }
+
+      // Collect the line
+      if (trimmed.length > 0 || currentTldr.length > 0) {
+        currentTldr.push(line);
+      }
+    }
+  }
+
+  // Save the last tl;dr section if we were still in one
+  if (inTldrSection && currentTldr.length > 0) {
+    const tldrText = currentTldr.join('\n').trim();
+    if (tldrText.length > 0) {
+      tldrSections.push(tldrText);
+    }
+  }
+
+  return tldrSections;
+}

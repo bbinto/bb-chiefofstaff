@@ -12,8 +12,40 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = FRONTEND.PORT;
 
+// Password protection configuration
+const APP_PASSWORD = process.env.APP_PASSWORD || null;
+
 app.use(cors());
 app.use(express.json());
+
+// Password protection middleware
+function passwordProtection(req, res, next) {
+  // Skip password check if no password is configured
+  if (!APP_PASSWORD) {
+    return next();
+  }
+
+  // Allow unauthenticated access to the root route to show login form
+  if (req.path === '/' && req.method === 'GET') {
+    return next();
+  }
+
+  // Check for password in header
+  const providedPassword = req.headers['x-app-password'];
+
+  if (providedPassword === APP_PASSWORD) {
+    return next();
+  }
+
+  // Return 401 Unauthorized
+  res.status(401).json({
+    error: 'Unauthorized',
+    message: 'Valid password required'
+  });
+}
+
+// Apply password protection to all routes except static files
+app.use(passwordProtection);
 
 // Path to reports folder (one level up from frontend)
 const REPORTS_DIR = path.join(__dirname, '..', PATHS.REPORTS_DIR);
@@ -255,6 +287,200 @@ app.get('/api/agents', (req, res) => {
     console.error('Error reading agents:', error);
     res.status(500).json({ error: 'Failed to read agents', details: error.message });
   }
+});
+
+// Store active executions for progress tracking
+const activeExecutions = new Map();
+
+// Run agents endpoint with real-time progress
+app.post('/api/run-agents', async (req, res) => {
+  try {
+    const { agents, dateRange, parameters } = req.body;
+
+    if (!agents || !Array.isArray(agents) || agents.length === 0) {
+      return res.status(400).json({ error: 'No agents specified' });
+    }
+
+    console.log('Received agent execution request:', { agents, dateRange, parameters });
+
+    // Build command arguments
+    const args = ['start', '--'];
+
+    // Add agent names
+    agents.forEach(agent => args.push(agent));
+
+    // Add date range if provided
+    if (dateRange?.startDate) {
+      args.push('--start-date', dateRange.startDate);
+    }
+    if (dateRange?.endDate) {
+      args.push('--end-date', dateRange.endDate);
+    }
+
+    // Add parameters if provided
+    if (parameters?.slackUserId) {
+      args.push('--slack-user-id', parameters.slackUserId);
+    }
+    if (parameters?.manualSourcesFolder) {
+      args.push('--manual-sources-folder', parameters.manualSourcesFolder);
+    }
+    if (parameters?.folder) {
+      args.push('--folder', parameters.folder);
+    }
+    if (parameters?.email) {
+      args.push('--email', parameters.email);
+    }
+    if (parameters?.week) {
+      args.push('--week', parameters.week);
+    }
+
+    const commandStr = `npm ${args.join(' ')}`;
+    console.log('Executing command:', commandStr);
+
+    // Execute the command
+    const { spawn } = await import('child_process');
+    const child = spawn('npm', args, {
+      cwd: path.join(__dirname, '..'),
+      shell: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    if (!child.pid) {
+      throw new Error('Failed to spawn process');
+    }
+
+    // Store execution info
+    const executionId = Date.now().toString();
+    activeExecutions.set(executionId, {
+      pid: child.pid,
+      agents,
+      logs: [],
+      status: 'running',
+      startTime: new Date()
+    });
+
+    // Capture stdout
+    child.stdout.on('data', (data) => {
+      const log = data.toString();
+      console.log(log);
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.logs.push({ type: 'stdout', message: log, timestamp: new Date() });
+      }
+    });
+
+    // Capture stderr
+    child.stderr.on('data', (data) => {
+      const log = data.toString();
+      console.error(log);
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.logs.push({ type: 'stderr', message: log, timestamp: new Date() });
+      }
+    });
+
+    // Handle process completion
+    child.on('exit', (code) => {
+      console.log(`Agent execution completed with code ${code}`);
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.status = code === 0 ? 'completed' : 'failed';
+        execution.exitCode = code;
+        execution.endTime = new Date();
+      }
+    });
+
+    // Handle process errors
+    child.on('error', (error) => {
+      console.error('Process error:', error);
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.status = 'error';
+        execution.error = error.message;
+        execution.logs.push({ type: 'error', message: error.message, timestamp: new Date() });
+      }
+    });
+
+    // Send immediate response that execution has started
+    res.json({
+      success: true,
+      message: 'Agent execution started',
+      agents,
+      executionId,
+      pid: child.pid
+    });
+
+  } catch (error) {
+    console.error('Error running agents:', error);
+    res.status(500).json({
+      error: 'Failed to run agents',
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Get execution status and logs
+app.get('/api/execution/:executionId', (req, res) => {
+  const { executionId } = req.params;
+  const execution = activeExecutions.get(executionId);
+
+  if (!execution) {
+    return res.status(404).json({ error: 'Execution not found' });
+  }
+
+  res.json(execution);
+});
+
+// Server-Sent Events endpoint for real-time progress
+app.get('/api/execution/:executionId/stream', (req, res) => {
+  const { executionId } = req.params;
+  const execution = activeExecutions.get(executionId);
+
+  if (!execution) {
+    return res.status(404).json({ error: 'Execution not found' });
+  }
+
+  // Set up SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  // Send existing logs
+  execution.logs.forEach(log => {
+    res.write(`data: ${JSON.stringify(log)}\n\n`);
+  });
+
+  // Set up interval to check for new logs
+  let lastLogIndex = execution.logs.length;
+  const interval = setInterval(() => {
+    const currentExecution = activeExecutions.get(executionId);
+    if (!currentExecution) {
+      clearInterval(interval);
+      res.end();
+      return;
+    }
+
+    // Send new logs
+    if (currentExecution.logs.length > lastLogIndex) {
+      for (let i = lastLogIndex; i < currentExecution.logs.length; i++) {
+        res.write(`data: ${JSON.stringify(currentExecution.logs[i])}\n\n`);
+      }
+      lastLogIndex = currentExecution.logs.length;
+    }
+
+    // Send status update
+    if (currentExecution.status !== 'running') {
+      res.write(`data: ${JSON.stringify({ type: 'status', status: currentExecution.status, exitCode: currentExecution.exitCode })}\n\n`);
+      clearInterval(interval);
+      res.end();
+    }
+  }, 1000);
+
+  // Clean up on client disconnect
+  req.on('close', () => {
+    clearInterval(interval);
+  });
 });
 
 app.listen(PORT, () => {

@@ -197,3 +197,81 @@ export function formatTimeLocal(date) {
   const seconds = String(date.getSeconds()).padStart(2, '0');
   return `${hours}-${minutes}-${seconds}`;
 }
+
+/**
+ * Get the ISO week number for a date (1-53)
+ * @param {Date} date - Date object
+ * @returns {number} ISO week number
+ */
+export function getISOWeekNumber(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+}
+
+/**
+ * Get the date of Monday of the ISO week containing a date
+ * @param {Date} date - Date object
+ * @returns {Date} Monday of the ISO week
+ */
+export function getMondayOfISOWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+  return new Date(d.setDate(diff));
+}
+
+/**
+ * Parse calendar week parameter (e.g., "week 1", "Week 2", "week 1 2025")
+ * @param {string} weekStr - Week string (e.g., "week 1", "Week 2", "week 1 2025")
+ * @returns {{week: number, year: number}|null} Parsed week and year, or null if invalid
+ */
+export function parseCalendarWeek(weekStr) {
+  if (!weekStr) return null;
+
+  // Normalize the string
+  const normalized = weekStr.trim().toLowerCase();
+
+  // Match patterns like "week 1", "week 2", "week 1 2025", "Week 2 2024"
+  const match = normalized.match(/week\s+(\d+)(?:\s+(\d{4}))?/);
+  if (!match) {
+    return null;
+  }
+
+  const week = parseInt(match[1], 10);
+  const year = match[2] ? parseInt(match[2], 10) : new Date().getFullYear();
+
+  // Validate week number (1-53)
+  if (week < 1 || week > 53) {
+    return null;
+  }
+
+  return { week, year };
+}
+
+/**
+ * Get date range (Monday to Sunday) for a calendar week
+ * @param {number} week - Week number (1-53)
+ * @param {number} year - Year (e.g., 2025)
+ * @returns {{startDate: string, endDate: string}} Date range in YYYY-MM-DD format
+ */
+export function getCalendarWeekDateRange(week, year) {
+  // January 4th is always in week 1 of its year (ISO standard)
+  const jan4 = new Date(year, 0, 4);
+  const jan4Monday = getMondayOfISOWeek(jan4);
+
+  // Calculate Monday of the target week
+  const targetMonday = new Date(jan4Monday);
+  targetMonday.setDate(jan4Monday.getDate() + (week - 1) * 7);
+
+  // Calculate Sunday of the target week (Monday + 6 days)
+  const targetSunday = new Date(targetMonday);
+  targetSunday.setDate(targetMonday.getDate() + 6);
+
+  return {
+    startDate: formatDateISO(targetMonday),
+    endDate: formatDateISO(targetSunday)
+  };
+}
