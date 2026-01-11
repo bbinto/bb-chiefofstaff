@@ -313,6 +313,12 @@ console.log('Available tools:', client.getAvailableTools());
 4. **Customize instructions**: Tailor agent markdown files to your needs
 5. **Monitor API usage**: Be mindful of Claude API token consumption
 
+## Frontend
+
+Check out the web app in the /frontend folder.
+
+[![Watch a demo]](https://www.loom.com/embed/5f7731e4a6b743b4b047e041a668d2a4)
+
 ## Contributing
 
 To add features or improve agents:
