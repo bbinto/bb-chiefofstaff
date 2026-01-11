@@ -317,9 +317,8 @@ console.log('Available tools:', client.getAvailableTools());
 
 Check out the web app in the /frontend folder.
 
-<div style="position: relative; padding-bottom: 56.25%; height: 0;"><iframe src="https://www.loom.com/embed/5f7731e4a6b743b4b047e041a668d2a4" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></iframe></div>
-
-[[Watch a demo](https://github.com/bbinto/bb-chiefofstaff/tree/main/frontend/public/cos-400.gif)](https://www.loom.com/embed/5f7731e4a6b743b4b047e041a668d2a4)
+![Watch a demo](https://github.com/bbinto/bb-chiefofstaff/tree/main/frontend/public/cos-400.gif)
+Link: https://www.loom.com/embed/5f7731e4a6b743b4b047e041a668d2a4
 
 ## Contributing
 
