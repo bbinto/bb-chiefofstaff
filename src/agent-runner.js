@@ -206,7 +206,7 @@ export class AgentRunner {
       }
     }
 
-    const messages = [
+    let messages = [
       {
         role: 'user',
         content: `${contextMessage}\n\n${instructions}${parameterMessage}\n\nPlease execute the agent's instructions now. Use the available MCP tools to gather the required data and provide a comprehensive report following the output format specified in the instructions.`

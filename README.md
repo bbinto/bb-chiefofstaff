@@ -318,6 +318,7 @@ console.log('Available tools:', client.getAvailableTools());
 Check out the web app in the /frontend folder.
 
 ![Watch a demo](https://github.com/bbinto/bb-chiefofstaff/blob/501e0397108173531a72e7ca3177977846db29f2/frontend/public/cos-400.gif?raw=true)
+
 Link: https://www.loom.com/embed/5f7731e4a6b743b4b047e041a668d2a4
 
 ## Contributing

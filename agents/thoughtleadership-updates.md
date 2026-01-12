@@ -87,9 +87,7 @@ Provide a structured summary. **CRITICAL FORMAT REQUIREMENT: You MUST begin your
 [One sentence summarizing the key insight - e.g., "Thought leadership analysis identifies 5 emerging topics with 3 high-priority trends requiring attention."]
 
 ### tl;dr
-- Number of new topics identified: [count]
-- Number of trending topics: [count]
-- Top 3 most important topics to know about
+**New**: [X] topics | **Trending**: [Y] topics | **Top 3**: [List]
 
 ### New Topics Identified
 For each new topic:

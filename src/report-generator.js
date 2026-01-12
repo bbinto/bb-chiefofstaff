@@ -30,7 +30,7 @@ export class ReportGenerator {
     const dateStr = formatDateLocalISO(timestamp);
     const timeStr = formatTimeLocal(timestamp);
 
-    let report = this.buildReportHeader(timestamp);
+    let report = this.buildReportHeader(timestamp, agentResults);
 
     // Add each agent's output
     for (const result of agentResults) {
@@ -63,8 +63,12 @@ export class ReportGenerator {
   /**
    * Build report header
    */
-  buildReportHeader(timestamp) {
-    return `# Chief of Staff Weekly Report
+  buildReportHeader(timestamp, agentResults) {
+    const title = agentResults.length === 1
+      ? `Chief of Staff - ${this.formatAgentName(agentResults[0].agentName)}`
+      : 'Chief of Staff Weekly Report';
+
+    return `# ${title}
 **Generated**: ${timestamp.toLocaleString()}
 
 ---
@@ -79,7 +83,9 @@ export class ReportGenerator {
     const title = this.formatAgentName(result.agentName);
 
     if (!result.success) {
-      return `## ${title}
+     return `## ${title}
+    
+
 
 **Status**: Failed
 **Error**: ${result.error}
@@ -107,13 +113,23 @@ export class ReportGenerator {
     
     const metadataSection = metadata ? `${metadata}\n` : '';
 
-    return `## ${title}
+ /*   return `## ${title}
+    
 
 ${metadataSection}${result.output}
 
 ---
 
+`;*/
+
+  return `
+
+  ${metadataSection}${result.output}
+
+---
+
 `;
+
   }
 
   /**
