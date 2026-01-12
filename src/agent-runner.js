@@ -22,7 +22,7 @@ import {
  */
 export class AgentRunner {
   constructor(mcpClient, config, dateRange = null, agentParams = {}) {
-    console.log('[AgentRunner] Constructor called with agentParams:', agentParams);
+    console.log('[AgentRunner] Constructor called with dateRange:', dateRange, 'agentParams:', agentParams);
     this.mcpClient = mcpClient;
     this.config = config;
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
@@ -206,6 +206,19 @@ export class AgentRunner {
       }
     }
 
+    if (agentName === 'tts') {
+      console.log('[AgentRunner] Processing tts agent. this.agentParams:', this.agentParams);
+      console.log('[AgentRunner] this.agentParams.reportFile value:', this.agentParams.reportFile);
+      if (this.agentParams.reportFile) {
+        console.log('[AgentRunner] ✅ Report file parameter found! Setting parameter message for report file:', this.agentParams.reportFile);
+        parameterMessage = `\n\n**IMPORTANT: Report File Parameter**\nThe report file parameter has been set to: "${this.agentParams.reportFile}"\nYou MUST read this specific report file and convert it to speech. The file path is: ${this.agentParams.reportFile}\nUse the Read tool to read the report file, then summarize it for narration, and use the Hume AI TTS tool (mcp__hume__tts) to convert it to speech.`;
+        console.log('[AgentRunner] Parameter message created for report file');
+      } else {
+        console.log('[AgentRunner] ❌ No report file parameter found in this.agentParams');
+        parameterMessage = `\n\n**IMPORTANT: Report File Parameter Required**\nNo report file path was provided. Please ask the user for the report file path before proceeding. The file path should be a markdown file (e.g., "reports/business-health-2025-01-12-10-30-00.md").`;
+      }
+    }
+
     let messages = [
       {
         role: 'user',
@@ -364,12 +377,13 @@ export class AgentRunner {
    * Build context message with configuration (optimized for token usage)
    */
   buildContextMessage() {
+    console.log('[AgentRunner] buildContextMessage called with dateRange:', this.dateRange);
     const today = new Date();
     const todayISO = today.toISOString().split('T')[0]; // YYYY-MM-DD format
-    
+
     // Get default days from config, default to 7 if not specified
     const defaultDays = this.config?.settings?.defaultDays || 7;
-    
+
     // Use provided date range or calculate defaults
     let endDateISO = todayISO;
     let startDateISO = null;
@@ -420,6 +434,7 @@ export class AgentRunner {
     const teamChannels = (slackChannels.teamChannels || []).join(', ');
 
     const dateRangeText = `Start: ${startDateISO} | End: ${endDateISO}${threeDaysAgoISO ? ` | 3d ago from end: ${threeDaysAgoISO}` : ''}`;
+    console.log('[AgentRunner] Calculated date range:', { startDateISO, endDateISO, threeDaysAgoISO, dateRangeText });
     const calendarNames = (this.config.calendar?.name || []).join(', ');
     const oneOnOnes = (this.config.team?.["1-1s"] || []).map(p => 
       `${p.name} (${p.email}, Role: ${p.role}, Relationship: ${p.relationship}, Slack: ${p.slackId}, DM: ${p.slackDMs || 'N/A'})`
@@ -473,7 +488,8 @@ Web Sources: ${(this.config.thoughtleadership?.webSources || []).join(', ') || '
 Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || []).join(', ') || 'None'}
 
 ## Dates (CRITICAL)
-Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date range (period) from ${startDateISO} to ${endDateISO} (includes both start and end dates). When querying data sources, use parameters like after: "${startDateISO}" (inclusive) and before: "${endDateISO}" or onOrBefore: "${endDateISO}" (depending on API) to query data within this period.${threeDaysAgoISO ? ` For "last 3 days", use "${threeDaysAgoISO}".` : ''}`;
+**Current Date/Time**: Today is ${todayISO}. The current date and time information is already provided here - DO NOT call any date/time retrieval tools (like get_current_time or similar).
+**Analysis Period**: Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date range (period) from ${startDateISO} to ${endDateISO} (includes both start and end dates). When querying data sources, use parameters like after: "${startDateISO}" (inclusive) and before: "${endDateISO}" or onOrBefore: "${endDateISO}" (depending on API) to query data within this period.${threeDaysAgoISO ? ` For "last 3 days", use "${threeDaysAgoISO}".` : ''}`;
   }
 
   /**

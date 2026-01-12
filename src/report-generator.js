@@ -83,7 +83,7 @@ export class ReportGenerator {
     const title = this.formatAgentName(result.agentName);
 
     if (!result.success) {
-     return `## ${title}
+     return `
     
 
 

@@ -7,6 +7,7 @@ Track and report on product development activities, engineering progress, featur
 - Jira/Atlassian (ticket completion for OV teams), use project key from `config.jira.projectKey`
 - Production Bug Filter: Use `config.jira.filters.Production_Bugs.filterId` (30480) for production bugs analysis
 - Tech Debt Kanban Board: Use `config.jira.OVTechDebtKanbanUrl` for tech debt progress and outcomes
+- Barbara_Initiatives Filter: Use `config.jira.filters.Barbara_Initiatives.filterId` (35578) for Barbara's accountability on team goals and quarterly projects
 - Slack channels from config.json: teamChannels, productGeneral, productFeedback (product launches and feedback)
 - Mixpanel (feature usage metrics), check manual_sources folder
 - OOO-WL calendar for out of office
@@ -92,6 +93,25 @@ To check for out of office status:
   - Any blockers preventing progress
   - Balance between tech debt work and feature work
   - Most impactful tech debt resolved
+
+### 1.3 Barbara's Key Initiatives Progress (Filter 35578)
+- Query Jira using the Barbara_Initiatives Filter: `config.jira.filters.Barbara_Initiatives.filterId` (35578)
+- This filter tracks Barbara's accountability on quarterly team goals and main projects
+- Filter for initiatives updated in the last N days where N = `config.settings.defaultDays`
+- For each initiative:
+  - Initiative ID and title (formatted as hyperlink)
+  - Current status and progress
+  - Recent comments and updates from the period
+  - Key developments or changes
+  - Any blockers or risks identified
+  - Related team or project
+
+- Analyze initiative patterns:
+  - Overall progress on quarterly goals
+  - Which initiatives show positive momentum?
+  - Any initiatives at risk or blocked?
+  - Recent comments indicating escalations or concerns?
+  - Progress velocity compared to expected timeline
 
 ### 2. Product Launches Review
 - Search Slack channels from config.json for launch announcements in the last N days where N = `config.settings.defaultDays`:
@@ -182,6 +202,12 @@ Provide a structured summary. **CRITICAL FORMAT REQUIREMENT: You MUST begin your
 **Completed**: [X] items
 **In Progress**: [X] items
 **Key Outcomes**: [Top 2-3 outcomes achieved with ticket links]
+
+### Barbara's Key Initiatives (Filter 35578)
+**Updated**: [X] initiatives
+**At Risk**: [X] initiatives (if any)
+**Top Updates** (Top 3):
+- [[Initiative]](link): [Status] - [Recent update/comment]
 
 ### Launches (Top 3 max)
 - **[Feature]** ([Date], [PM]): [1-line impact]

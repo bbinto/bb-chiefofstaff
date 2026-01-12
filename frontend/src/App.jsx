@@ -5,6 +5,7 @@ import FilterBar from './components/FilterBar'
 import Login from './components/Login'
 import AgentRunner from './components/AgentRunner'
 import Analytics from './components/Analytics'
+import ConfigViewer from './components/ConfigViewer'
 import mariLogo from './img/mari-128.png'
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [showAgentRunner, setShowAgentRunner] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
+  const [showConfig, setShowConfig] = useState(false)
 
   useEffect(() => {
     // Check if password is stored in sessionStorage
@@ -111,7 +113,20 @@ function App() {
   }
 
   // Get unique weeks from reports
-  const weeks = [...new Set(reports.map(report => getWeekNumber(report.timestamp)))]
+  const reportWeeks = [...new Set(reports.map(report => getWeekNumber(report.timestamp)))]
+
+  // Add predefined calendar weeks (weeks 1-6 of 2026)
+  const predefinedWeeks = [
+    '2026-W01',
+    '2026-W02',
+    '2026-W03',
+    '2026-W04',
+    '2026-W05',
+    '2026-W06'
+  ]
+
+  // Combine and deduplicate weeks, then sort
+  const weeks = [...new Set([...predefinedWeeks, ...reportWeeks])]
     .sort()
     .reverse()
 
@@ -180,6 +195,16 @@ function App() {
             </div>
             <div className="flex items-center gap-4">
               <button
+                onClick={() => setShowConfig(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span className="font-medium text-sm">Config</span>
+              </button>
+              <button
                 onClick={() => {
                   console.log('Analytics button clicked')
                   setShowAnalytics(true)
@@ -238,7 +263,12 @@ function App() {
       </header>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        {showAnalytics ? (
+        {showConfig ? (
+          <ConfigViewer
+            password={password}
+            onBack={() => setShowConfig(false)}
+          />
+        ) : showAnalytics ? (
           <Analytics
             password={password}
             onBack={() => setShowAnalytics(false)}

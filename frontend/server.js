@@ -50,6 +50,9 @@ app.use(passwordProtection);
 // Path to reports folder (one level up from frontend)
 const REPORTS_DIR = path.join(__dirname, '..', PATHS.REPORTS_DIR);
 
+// Path to config.json (one level up from frontend)
+const CONFIG_PATH = path.join(__dirname, '..', 'config.json');
+
 // Serve static files from dist folder if it exists (production build)
 const DIST_DIR = path.join(__dirname, 'dist');
 if (fs.existsSync(DIST_DIR)) {
@@ -310,10 +313,13 @@ app.post('/api/run-agents', async (req, res) => {
     agents.forEach(agent => args.push(agent));
 
     // Add date range if provided
+    console.log('Date range check - startDate:', dateRange?.startDate, 'endDate:', dateRange?.endDate);
     if (dateRange?.startDate) {
+      console.log('Adding --start-date argument:', dateRange.startDate);
       args.push('--start-date', dateRange.startDate);
     }
     if (dateRange?.endDate) {
+      console.log('Adding --end-date argument:', dateRange.endDate);
       args.push('--end-date', dateRange.endDate);
     }
 
@@ -430,6 +436,50 @@ app.get('/api/execution/:executionId', (req, res) => {
   }
 
   res.json(execution);
+});
+
+// Get config.json
+app.get('/api/config', (req, res) => {
+  try {
+    if (!fs.existsSync(CONFIG_PATH)) {
+      return res.status(404).json({ error: 'Config file not found' });
+    }
+
+    const configContent = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    const config = JSON.parse(configContent);
+    res.json(config);
+  } catch (error) {
+    console.error('Error reading config:', error);
+    res.status(500).json({ error: 'Failed to read config', details: error.message });
+  }
+});
+
+// Update config.json
+app.put('/api/config', (req, res) => {
+  try {
+    const newConfig = req.body;
+
+    // Validate that it's a valid object
+    if (!newConfig || typeof newConfig !== 'object') {
+      return res.status(400).json({ error: 'Invalid config format' });
+    }
+
+    // Create a backup of the current config
+    const backupPath = path.join(__dirname, '..', `config.backup.${Date.now()}.json`);
+    if (fs.existsSync(CONFIG_PATH)) {
+      fs.copyFileSync(CONFIG_PATH, backupPath);
+      console.log(`Config backup created at: ${backupPath}`);
+    }
+
+    // Write the new config
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2), 'utf-8');
+    console.log('Config updated successfully');
+
+    res.json({ success: true, message: 'Config updated successfully', backupPath });
+  } catch (error) {
+    console.error('Error updating config:', error);
+    res.status(500).json({ error: 'Failed to update config', details: error.message });
+  }
 });
 
 // Server-Sent Events endpoint for real-time progress

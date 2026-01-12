@@ -25,6 +25,7 @@ class ChiefOfStaffAgent {
 
     // Define agent execution order
     this.agents = [
+      'prep-for-week',
       'weekly-recap',
       'business-health',
       'product-engineering',
@@ -40,7 +41,8 @@ class ChiefOfStaffAgent {
       'officevibe-strategy-roadmap',
       'slack-user-analysis',
       '1-1',
-      'weekly-executive-summary'
+      'weekly-executive-summary',
+      'tts'
     ];
   }
 

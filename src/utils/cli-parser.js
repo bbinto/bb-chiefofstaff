@@ -8,7 +8,7 @@ import { parseDateRangeFromArgs } from './date-utils.js';
 /**
  * Parse agent parameters from command line arguments
  * @param {string[]} args - Command line arguments
- * @returns {{slackUserId?: string, manualSourcesFolder?: string, folder?: string, email?: string, week?: string}} Parsed agent parameters
+ * @returns {{slackUserId?: string, manualSourcesFolder?: string, folder?: string, email?: string, week?: string, reportFile?: string}} Parsed agent parameters
  */
 export function parseAgentParams(args) {
   console.log('[CLI Parser] Parsing agent parameters from args:', args);
@@ -18,8 +18,9 @@ export function parseAgentParams(args) {
   const folderIndex = args.indexOf('--folder');
   const emailIndex = args.indexOf('--email');
   const weekIndex = args.indexOf('--week');
+  const reportFileIndex = args.indexOf('--report-file');
 
-  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex, 'email:', emailIndex, 'week:', weekIndex);
+  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex, 'email:', emailIndex, 'week:', weekIndex, 'reportFile:', reportFileIndex);
 
   if (slackUserIdIndex !== -1 && args[slackUserIdIndex + 1]) {
     params.slackUserId = args[slackUserIdIndex + 1];
@@ -66,6 +67,17 @@ export function parseAgentParams(args) {
     }
   }
 
+  if (reportFileIndex !== -1 && args[reportFileIndex + 1]) {
+    params.reportFile = args[reportFileIndex + 1];
+    console.log('[CLI Parser] Found reportFile:', params.reportFile);
+    // Basic validation - should end with .md
+    if (!params.reportFile.endsWith('.md')) {
+      console.warn(
+        `Warning: Report file "${params.reportFile}" doesn't end with .md (should be like "reports/business-health-2025-01-12-10-30-00.md")`
+      );
+    }
+  }
+
   console.log('[CLI Parser] Final parsed params:', params);
   return params;
 }
@@ -87,7 +99,8 @@ export function extractAgentNames(args) {
     '--manual-sources-folder',
     '--folder',
     '--email',
-    '--week'
+    '--week',
+    '--report-file'
   ];
 
   for (let i = 0; i < args.length; i++) {
@@ -150,6 +163,7 @@ Options:
   --manual-sources-folder FOLDER    Folder within manual_sources to use for business-health agent (e.g., "Week 1", "Week 2", "planning")
   --folder FOLDER                   Folder within manual_sources to use for telemetry-deepdive agent (e.g., "week1", "week2")
   --week WEEK                       Calendar week for weekly-executive-summary agent (e.g., "week 1" or "week 1 2025") (required when running weekly-executive-summary)
+  --report-file FILE_PATH           Report file path for tts agent (e.g., "reports/business-health-2025-01-12-10-30-00.md") (required when running tts)
 
 Note: When using npm, you MUST use '--' before any arguments
 
@@ -164,6 +178,7 @@ Available Agents:
   - slack-user-analysis            Analyze a Slack user's contributions and communication patterns
   - 1-1                            Prepare for a 1-1 meeting with a specific person (requires --email)
   - weekly-executive-summary       Generate executive summary from all reports for a specific calendar week (requires --week)
+  - tts                            Convert a markdown report to speech using Hume AI (requires --report-file)
 
 Examples:
   npm start
@@ -178,6 +193,7 @@ Examples:
   npm start -- telemetry-deepdive --folder week2
   npm start -- weekly-executive-summary --week "week 1"
   npm start -- weekly-executive-summary --week "week 2 2025"
+  npm start -- tts --report-file "reports/business-health-2025-01-12-10-30-00.md"
   npm start -- --list
 `);
 }
@@ -240,5 +256,15 @@ export function validateAgentRequirements(specificAgents, agentParams) {
     console.warn(`\n⚠️  Warning: weekly-executive-summary requires --week parameter.`);
     console.warn(`   Example: npm start -- weekly-executive-summary --week "week 1"`);
     console.warn(`   Example: npm start -- weekly-executive-summary --week "week 2 2025"\n`);
+  }
+
+  // Warn if tts is run without report-file
+  if (
+    specificAgents &&
+    specificAgents.includes('tts') &&
+    !agentParams.reportFile
+  ) {
+    console.warn(`\n⚠️  Warning: tts agent requires --report-file parameter.`);
+    console.warn(`   Example: npm start -- tts --report-file "reports/business-health-2025-01-12-10-30-00.md"\n`);
   }
 }
