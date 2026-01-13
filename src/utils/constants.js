@@ -6,7 +6,7 @@
 // API and Model Configuration
 export const API_DEFAULTS = {
   MODEL: 'claude-sonnet-4-5-20250929',
-  MAX_TOKENS: 8000,
+  MAX_TOKENS: 8000, // Conservative limit for compatibility
 };
 
 // Token Limits and Pricing

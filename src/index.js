@@ -37,11 +37,13 @@ class ChiefOfStaffAgent {
       'productivity-weekly-tracker',
       'quarterly-review',
       'quarterly-performance-review',
+      'performance-review-q3',
       'thoughtleadership-updates',
       'officevibe-strategy-roadmap',
       'slack-user-analysis',
       '1-1',
       'weekly-executive-summary',
+      'good-vibes-recognition',
       'tts'
     ];
   }

@@ -31,7 +31,7 @@ code {
   margin-top: 0.75em;
   margin-bottom: 0.75em;
   line-height: 1.2;
-  background: linear-gradient(to right, #4f46e5, #9333ea, #db2777);
+  background: linear-gradient(to right, #00203F, #00203F, #ADEFD1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -43,7 +43,7 @@ code {
   margin-top: 0.75em;
   margin-bottom: 0.75em;
   line-height: 1.1;
-  background: linear-gradient(to right, #4f46e5, #9333ea, #db2777);
+  background: linear-gradient(to right, #00203F, #00203F, #ADEFD1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -55,7 +55,7 @@ code {
   margin-top: 1.25em;
   margin-bottom: 0.5em;
   line-height: 1.3;
-  background: linear-gradient(to right, #4f46e5, #9333ea, #db2777);
+  background: linear-gradient(to right, #00203F, #00203F, #ADEFD1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -67,7 +67,7 @@ code {
   margin-top: 1em;
   margin-bottom: 0.5em;
   line-height: 1.4;
-  background: linear-gradient(to right, #4f46e5, #9333ea, #db2777);
+  background: linear-gradient(to right, #00203F, #00203F, #ADEFD1);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -86,7 +86,7 @@ code {
 }
 
 .prose a {
-  color: #4f46e5;
+  color: #00203F;
   text-decoration: underline;
   font-weight: 600;
   transition: color 0.2s;
@@ -249,5 +249,145 @@ code {
   vertical-align: baseline;
   padding: 0.5em;
   font-size: 0.8125rem;
+}
+
+/* Report Viewer - H3 Section Boxes with Grid Layout */
+.h3-section-box {
+  background: white;
+  border: 2px solid #14b8a6;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.h3-section-box h3 {
+  background: linear-gradient(to right, #00203F, #0d9488) !important;
+  color: white !important;
+  -webkit-text-fill-color: white !important;
+  margin: 0 !important;
+  padding: 0.75rem 1rem !important;
+  font-size: 1rem !important;
+  border-bottom: 2px solid #5eead4;
+}
+
+.h3-section-content {
+  padding: 1rem;
+  flex-grow: 1;
+}
+
+.h3-section-content > *:first-child {
+  margin-top: 0;
+}
+
+.h3-section-content > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Grid layout for H3 sections on larger screens */
+.report-content-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .report-content-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .report-content-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Full-width sections (like Actionable Recommendations, Actions) */
+.full-width-section {
+  grid-column: 1 / -1;
+}
+
+/* H2 sections span full width */
+.report-h2-section {
+  grid-column: 1 / -1;
+  margin-bottom: 1rem;
+}
+
+.report-h2-section h2 {
+  font-size: 1.5rem !important;
+  font-weight: 700 !important;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #14b8a6;
+  margin-bottom: 1rem;
+}
+
+/* Executive Summary - Full Width with Distinctive Background */
+.executive-summary-box {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%);
+  border: 3px solid #14b8a6;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.executive-summary-box h3 {
+  background: linear-gradient(to right, #00203F, #0d9488) !important;
+  color: white !important;
+  -webkit-text-fill-color: white !important;
+  margin: 0 !important;
+  padding: 1rem 1.5rem !important;
+  font-size: 1.125rem !important;
+  font-weight: 700 !important;
+  border-bottom: 3px solid #5eead4;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.executive-summary-box h3::before {
+  content: "📋";
+  font-size: 1.25rem;
+}
+
+.executive-summary-content {
+  padding: 1.5rem;
+  font-size: 1rem;
+  line-height: 1.75;
+  color: #0f766e;
+  font-weight: 500;
+}
+
+.executive-summary-content > *:first-child {
+  margin-top: 0;
+}
+
+.executive-summary-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.executive-summary-content p {
+  font-size: 1rem !important;
+  color: #0f766e !important;
+}
+
+/* Report Footer - No box styling */
+.prose p:has(em:only-child) {
+  background: none !important;
+  border: none !important;
+  padding: 0 !important;
+  margin-top: 2rem !important;
+  text-align: center;
+}
+
+.prose em {
+  font-style: italic;
+  color: #6b7280;
 }
 

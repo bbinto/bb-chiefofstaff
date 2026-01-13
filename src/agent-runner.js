@@ -61,6 +61,11 @@ export class AgentRunner {
    * Make API call with rate limiting and retry logic
    */
   async makeApiCall(params, retries = RETRY_CONFIG.MAX_RETRIES) {
+    // Validate messages array is not empty
+    if (!params.messages || params.messages.length === 0) {
+      throw new Error('Invalid API call: messages array is empty or undefined. At least one message is required.');
+    }
+
     // Estimate tokens before making the call
     const estimatedTokens = this.messageTruncator.estimateTokenCount(params.messages || [], params.tools || []);
 
@@ -103,17 +108,23 @@ export class AgentRunner {
 
           if (attempt < retries - 1) {
             // Truncate messages more aggressively
-            if (params.messages) {
+            if (params.messages && params.messages.length > 0) {
               const truncated = this.messageTruncator.truncateMessages(
                 params.messages,
                 MESSAGE_TRUNCATION.AGGRESSIVE_TRUNCATION_LIMIT,
                 params.tools
               );
-              // Replace the messages array contents (preserve reference for caller)
-              params.messages.length = 0;
-              params.messages.push(...truncated);
-              console.log(`Retrying with truncated messages (${params.messages.length} messages)...`);
-              continue;
+
+              // Validate truncated messages is not empty
+              if (truncated && truncated.length > 0) {
+                // Replace the messages array contents (preserve reference for caller)
+                params.messages.length = 0;
+                params.messages.push(...truncated);
+                console.log(`Retrying with truncated messages (${params.messages.length} messages)...`);
+                continue;
+              } else {
+                console.error('❌ Truncation resulted in empty messages array. Cannot retry.');
+              }
             }
           }
 
@@ -144,10 +155,11 @@ export class AgentRunner {
     console.log(`Running Agent: ${agentName.toUpperCase()}`);
     console.log(`${'='.repeat(80)}\n`);
 
+    const startTime = Date.now(); // Track execution start time
     const instructions = this.loadAgentInstructions(agentName);
 
-    // Prepare context with configuration
-    const contextMessage = this.buildContextMessage();
+    // Prepare context with configuration (will be cached)
+    this.contextMessage = this.buildContextMessage();
 
     // Build parameter message for agents that need it
     let parameterMessage = '';
@@ -219,20 +231,46 @@ export class AgentRunner {
       }
     }
 
+    if (agentName === 'performance-review-q3') {
+      console.log('[AgentRunner] Processing performance-review-q3 agent. this.agentParams:', this.agentParams);
+      console.log('[AgentRunner] this.agentParams.email value:', this.agentParams.email);
+      if (this.agentParams.email) {
+        console.log('[AgentRunner] ✅ Email parameter found! Setting parameter message for email:', this.agentParams.email);
+        parameterMessage = `\n\n**IMPORTANT: Email Parameter**\nThe email address for the performance review is: ${this.agentParams.email}\nPlease use this email to:\n1. Find the person's Slack ID from config.team.ovTeamMembers or config.team.OVEntireTeam\n2. Locate their specific folder in manual_sources/wpm/${this.agentParams.email}/\n3. Search for their activity in Slack, Jira, and Confluence during Q3 2025 (October 1 - December 31, 2025)\n4. Generate a comprehensive performance review following the Workleap Performance Cycle questionnaire format.`;
+        console.log('[AgentRunner] Parameter message created for performance review');
+      } else {
+        console.log('[AgentRunner] ❌ No email parameter found in this.agentParams');
+        parameterMessage = `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to review before proceeding. The email should match someone in the team configuration (config.team.ovTeamMembers or config.team.OVEntireTeam).`;
+      }
+    }
+
     let messages = [
       {
         role: 'user',
-        content: `${contextMessage}\n\n${instructions}${parameterMessage}\n\nPlease execute the agent's instructions now. Use the available MCP tools to gather the required data and provide a comprehensive report following the output format specified in the instructions.`
+        content: `${instructions}${parameterMessage}\n\nPlease execute the agent's instructions now. Use the available MCP tools to gather the required data and provide a comprehensive report following the output format specified in the instructions.`
       }
     ];
 
-    // Get available tools from MCP
-    const tools = this.buildToolsSchema();
+    // Get available tools from MCP (filtered by agent type)
+    const tools = this.buildToolsSchema(agentName);
+
+    // Debug: Log tool names being sent to Claude
+    console.log(`\n🔧 Tools available to ${agentName}:`, tools.map(t => t.name).slice(0, 10).join(', '), tools.length > 10 ? `... and ${tools.length - 10} more` : '');
+
+    // Build system message with caching for context
+    const systemMessage = [
+      {
+        type: "text",
+        text: this.contextMessage,
+        cache_control: { type: "ephemeral" }
+      }
+    ];
 
     try {
       let response = await this.makeApiCall({
         model: this.model,
         max_tokens: API_DEFAULTS.MAX_TOKENS,
+        system: systemMessage,
         tools,
         messages
       });
@@ -250,9 +288,12 @@ export class AgentRunner {
         const toolResults = await Promise.all(
           toolUses.map(async (toolUse) => {
             let toolResult;
-            
+
+            // Debug: Log exact tool name being called
+            console.log(`\n🔧 Calling tool: "${toolUse.name}" (length: ${toolUse.name.length} chars)`);
+
             // Check if it's a custom filesystem tool
-            if (toolUse.name === 'read_file_from_manual_sources' || 
+            if (toolUse.name === 'read_file_from_manual_sources' ||
                 toolUse.name === 'list_manual_sources_files' ||
                 toolUse.name === 'list_reports_in_week' ||
                 toolUse.name === 'read_report_file') {
@@ -261,7 +302,39 @@ export class AgentRunner {
               // Use MCP client for other tools
               toolResult = await this.mcpClient.callTool(toolUse.name, toolUse.input);
             }
-            
+
+            // Summarize large tool results to reduce token usage
+            const resultString = JSON.stringify(toolResult);
+            const resultLength = resultString.length;
+
+            // If result is larger than 50k characters (~12.5k tokens), summarize it
+            if (resultLength > 50000) {
+              console.log(`⚠️  Large tool result from ${toolUse.name} (${Math.round(resultLength/1000)}k chars), summarizing...`);
+
+              // Try to intelligently truncate based on result type
+              if (Array.isArray(toolResult)) {
+                toolResult = {
+                  _summary: `Array truncated: showing first 50 of ${toolResult.length} items`,
+                  _total_items: toolResult.length,
+                  items: toolResult.slice(0, 50)
+                };
+              } else if (typeof toolResult === 'object' && toolResult !== null) {
+                // Keep structure but truncate large string values
+                const summarized = {};
+                for (const [key, value] of Object.entries(toolResult)) {
+                  if (typeof value === 'string' && value.length > 5000) {
+                    summarized[key] = value.substring(0, 5000) + `... [truncated ${Math.round((value.length - 5000)/1000)}k more chars]`;
+                  } else {
+                    summarized[key] = value;
+                  }
+                }
+                toolResult = {
+                  _summary: 'Large object values truncated',
+                  ...summarized
+                };
+              }
+            }
+
             return {
               type: 'tool_result',
               tool_use_id: toolUse.id,
@@ -298,6 +371,7 @@ export class AgentRunner {
         response = await this.makeApiCall({
           model: this.model,
           max_tokens: API_DEFAULTS.MAX_TOKENS,
+          system: systemMessage,
           tools,
           messages
         });
@@ -309,11 +383,17 @@ export class AgentRunner {
         .map(block => block.text)
         .join('\n');
 
+      const endTime = Date.now(); // Track execution end time
+      const executionTimeMs = endTime - startTime;
+      const executionTimeSec = (executionTimeMs / 1000).toFixed(2);
+
       const result = {
         agentName,
         success: true,
         output: textContent,
-        usage: response.usage
+        usage: response.usage,
+        executionTimeMs,
+        executionTimeSec
       };
       
       // Include agent-specific parameters in result for reporting
@@ -494,10 +574,21 @@ Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || 
 
   /**
    * Build tools schema for Claude from MCP tools + custom filesystem tools
+   * Filters tools based on agent type to reduce token overhead
    */
-  buildToolsSchema() {
+  buildToolsSchema(agentName) {
     const availableTools = this.mcpClient.getAvailableTools();
-    const mcpTools = availableTools.map(tool => ({
+
+    // DISABLED: Tool filtering was causing issues with Slack tools not matching the prefix pattern
+    // Keeping all tools available to ensure agents can access all necessary MCP tools
+    // The small token overhead (~10k tokens) is worth avoiding tool access issues
+
+    let filteredTools = availableTools;
+
+    // Note: Previously tried filtering to reduce token usage, but it broke Slack tool access
+    // Tools like 'slack_list_users' don't start with 'mcp__Slack__' prefix
+
+    const mcpTools = filteredTools.map(tool => ({
       name: tool.name,
       description: tool.schema.description || `Tool from ${tool.server} server`,
       input_schema: tool.schema.inputSchema || {
@@ -507,7 +598,7 @@ Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || 
       }
     }));
 
-    // Add custom filesystem tools using ToolHandler
+    // Add custom filesystem tools using ToolHandler (always include)
     const filesystemTools = this.toolHandler.buildCustomToolsSchema();
 
     return [...mcpTools, ...filesystemTools];

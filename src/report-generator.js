@@ -110,6 +110,9 @@ export class ReportGenerator {
       metadata += `**Token Usage**: ${inputTokens.toLocaleString()} input, ${outputTokens.toLocaleString()} output\n`;
       metadata += `**Cost**: $${totalCost.toFixed(4)} ($${inputCost.toFixed(4)} input + $${outputCost.toFixed(4)} output)\n`;
     }
+    if (result.executionTimeSec) {
+      metadata += `**Execution Time**: ${result.executionTimeSec}s\n`;
+    }
     
     const metadataSection = metadata ? `${metadata}\n` : '';
 

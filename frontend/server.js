@@ -139,6 +139,19 @@ function extractCost(content) {
   return null;
 }
 
+/**
+ * Extract execution time from report content
+ * Looks for pattern: **Execution Time**: X.XXs
+ */
+function extractExecutionTime(content) {
+  const execTimeRegex = /\*\*Execution Time\*\*:\s*(\d+\.?\d*)s/;
+  const match = content.match(execTimeRegex);
+  if (match && match[1]) {
+    return parseFloat(match[1]);
+  }
+  return null;
+}
+
 // Get all reports
 app.get('/api/reports', (req, res) => {
   try {
@@ -176,10 +189,11 @@ app.get('/api/reports', (req, res) => {
           agentName = file.replace('.md', '').toLowerCase().replace(/\s+/g, '-');
         }
         
-        // Read file content to extract one-line summary, insights, and cost
+        // Read file content to extract one-line summary, insights, cost, and execution time
         let oneLineSummary = null;
         let insights = [];
         let cost = null;
+        let executionTime = null;
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
           oneLineSummary = extractOneLineSummary(content);
@@ -187,12 +201,13 @@ app.get('/api/reports', (req, res) => {
           if (!oneLineSummary) {
             insights = extractInsights(content);
           }
-          // Extract cost from content
+          // Extract cost and execution time from content
           cost = extractCost(content);
+          executionTime = extractExecutionTime(content);
         } catch (err) {
           console.error(`Error reading ${file} for summary:`, err.message);
         }
-        
+
         return {
           id: file,
           filename: file,
@@ -203,7 +218,8 @@ app.get('/api/reports', (req, res) => {
           size: stats.size,
           oneLineSummary,
           insights,
-          cost
+          cost,
+          executionTime
         };
       })
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -533,7 +549,94 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// Check MCP connection status
+app.get('/api/mcp-status', async (req, res) => {
+  try {
+    // Import MCPClientManager
+    const { MCPClientManager } = await import('../src/mcp-client.js');
+
+    // Create a temporary MCP client instance
+    const mcpClient = new MCPClientManager();
+    const mcpServers = mcpClient.loadMCPConfig();
+
+    const serverNames = Object.keys(mcpServers);
+    const serverStatuses = [];
+
+    console.log(`Checking status for ${serverNames.length} MCP servers...`);
+
+    // Test each server connection
+    for (const serverName of serverNames) {
+      const serverConfig = mcpServers[serverName];
+      const status = {
+        name: serverName,
+        config: {
+          command: serverConfig.command,
+          args: serverConfig.args || []
+        },
+        connected: false,
+        toolCount: 0,
+        error: null
+      };
+
+      try {
+        // Try to connect to the server with timeout
+        await mcpClient.connectToServer(serverName, serverConfig);
+
+        // If connection succeeded, get tool count and details
+        const tools = Array.from(mcpClient.tools.entries())
+          .filter(([_, info]) => info.serverName === serverName)
+          .map(([toolName, info]) => ({
+            name: toolName,
+            description: info.schema.description || 'No description available'
+          }));
+
+        status.connected = true;
+        status.toolCount = tools.length;
+        status.tools = tools;
+
+        console.log(`✓ ${serverName}: Connected (${tools.length} tools)`);
+      } catch (error) {
+        status.error = error.message;
+        console.log(`✗ ${serverName}: ${error.message}`);
+      }
+
+      serverStatuses.push(status);
+    }
+
+    // Clean up connections
+    await mcpClient.close();
+
+    const connectedCount = serverStatuses.filter(s => s.connected).length;
+    const totalCount = serverStatuses.length;
+
+    res.json({
+      totalServers: totalCount,
+      connectedServers: connectedCount,
+      failedServers: totalCount - connectedCount,
+      servers: serverStatuses,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error checking MCP status:', error);
+    res.status(500).json({
+      error: 'Failed to check MCP status',
+      details: error.message
+    });
+  }
+});
+
+// Handle client-side routing - serve index.html for .md URLs
+app.get('/*.md', (req, res) => {
+  if (fs.existsSync(DIST_DIR)) {
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+  } else {
+    res.status(404).send('Frontend not built. Run: cd frontend && npm run build');
+  }
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
+  console.log(`Access from network at http://10.88.111.20:${PORT}`);
 });
 

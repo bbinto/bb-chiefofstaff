@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 
+// Get API URL from environment variable, fallback to relative URL (uses proxy)
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 function AgentRunner({ password, onClose }) {
   const [agents, setAgents] = useState([
     { name: 'prep-for-week', displayName: 'Prep for the Week', description: 'Prepare for upcoming week with todos, calendar, and 1-1 notes', lastRun: null },
@@ -14,11 +17,14 @@ function AgentRunner({ password, onClose }) {
     { name: 'productivity-weekly-tracker', displayName: 'Productivity Tracker', description: 'Weekly productivity tracking', lastRun: null },
     { name: 'quarterly-review', displayName: 'Quarterly Review', description: 'Quarterly review of product releases and OKR updates', lastRun: null },
     { name: 'quarterly-performance-review', displayName: 'Quarterly Performance Review', description: 'Quarterly performance review for Director of Product', lastRun: null },
+    { name: 'performance-review-q3', displayName: 'Q3 Performance Review (WL)', description: 'Generate Q3 performance review using Workleap questionnaire format', requiresParam: 'email', lastRun: null },
     { name: 'thoughtleadership-updates', displayName: 'Thought Leadership', description: 'Product thought leadership and new topics', lastRun: null },
     { name: 'officevibe-strategy-roadmap', displayName: 'Officevibe Strategy Roadmap', description: 'Strategy roadmap for Officevibe', lastRun: null },
     { name: 'slack-user-analysis', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', lastRun: null },
     { name: '1-1', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', lastRun: null },
-    { name: 'weekly-executive-summary', displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null }
+    { name: 'weekly-executive-summary', displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
+    { name: 'good-vibes-recognition', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null }
+     
   ])
 
   const [selectedAgents, setSelectedAgents] = useState([])
@@ -52,7 +58,7 @@ function AgentRunner({ password, onClose }) {
     const fetchLastRunTimes = async () => {
       try {
         const headers = password ? { 'x-app-password': password } : {}
-        const response = await fetch('http://localhost:3001/api/reports', { headers })
+        const response = await fetch(`${API_URL}/api/reports`, { headers })
 
         if (!response.ok) return
 
@@ -158,7 +164,7 @@ function AgentRunner({ password, onClose }) {
 
       setExecutionLogs(prev => [...prev, `Starting execution of ${selectedAgents.length} agent(s)...`])
 
-      const response = await fetch('http://localhost:3001/api/run-agents', {
+      const response = await fetch(`${API_URL}/api/run-agents`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -177,7 +183,7 @@ function AgentRunner({ password, onClose }) {
       setExecutionLogs(prev => [...prev, `Process started with PID: ${result.pid}`])
 
       // Connect to Server-Sent Events stream for real-time logs
-      const eventSource = new EventSource(`http://localhost:3001/api/execution/${result.executionId}/stream`)
+      const eventSource = new EventSource(`${API_URL}/api/execution/${result.executionId}/stream`)
 
       eventSource.onmessage = (event) => {
         try {
@@ -237,7 +243,7 @@ function AgentRunner({ password, onClose }) {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 px-6 py-4 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-[#00203F] via-teal-700 to-teal-600 px-6 py-4 flex items-center justify-between">
           <h2 className="text-2xl font-bold text-white">Run Agent Reports</h2>
           <button
             onClick={onClose}
@@ -257,7 +263,7 @@ function AgentRunner({ password, onClose }) {
               <h3 className="text-lg font-semibold text-gray-900">Select Agents</h3>
               <button
                 onClick={handleSelectAll}
-                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                className="text-sm text-[#00203F] hover:text-teal-700 font-medium"
                 disabled={isRunning}
               >
                 {selectedAgents.length === agents.length ? 'Deselect All' : 'Select All'}
@@ -269,8 +275,8 @@ function AgentRunner({ password, onClose }) {
                   key={agent.name}
                   className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
                     selectedAgents.includes(agent.name)
-                      ? 'border-indigo-500 bg-indigo-50'
-                      : 'border-gray-200 hover:border-indigo-300 bg-white'
+                      ? 'border-teal-500 bg-teal-50'
+                      : 'border-gray-200 hover:border-teal-300 bg-white'
                   } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                   <input
@@ -278,7 +284,7 @@ function AgentRunner({ password, onClose }) {
                     checked={selectedAgents.includes(agent.name)}
                     onChange={() => handleAgentToggle(agent.name)}
                     disabled={isRunning}
-                    className="mt-1 w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
+                    className="mt-1 w-4 h-4 text-[#00203F] rounded focus:ring-teal-500"
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
@@ -314,7 +320,7 @@ function AgentRunner({ password, onClose }) {
                   value={dateRange.startDate}
                   onChange={(e) => setDateRange(prev => ({ ...prev, startDate: e.target.value }))}
                   disabled={isRunning}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                 />
               </div>
               <div>
@@ -326,7 +332,7 @@ function AgentRunner({ password, onClose }) {
                   value={dateRange.endDate}
                   onChange={(e) => setDateRange(prev => ({ ...prev, endDate: e.target.value }))}
                   disabled={isRunning}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                 />
               </div>
             </div>
@@ -368,7 +374,7 @@ function AgentRunner({ password, onClose }) {
                         agent.requiresParam === 'week' ? 'e.g., week 1 or week 1 2025' :
                         ''
                       }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                     />
                   </div>
                 ))}
@@ -448,7 +454,7 @@ function AgentRunner({ password, onClose }) {
             <button
               onClick={handleRunAgents}
               disabled={isRunning || selectedAgents.length === 0}
-              className="px-6 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              className="px-6 py-2 bg-gradient-to-r from-[#00203F] to-teal-600 text-white rounded-lg hover:from-teal-700 hover:to-teal-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
               {isRunning ? 'Running...' : 'Run Selected Agents'}
             </button>

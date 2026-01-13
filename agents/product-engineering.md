@@ -124,12 +124,17 @@ To check for out of office status:
   - The config provides channel IDs in arrays: `config.slack.channels.productGeneral` contains IDs like ["C0123456798", "C0123456798"]
   - When calling Slack MCP tools, use the channel ID directly (e.g., `channel: "C0123456798"`), NOT the name
   - DO NOT convert channel IDs to names or use channel names in any MCP tool calls
-- **IMPORTANT: Searching for messages from team members (PMs)**
-  - You MUST search for each PM individually - DO NOT pass multiple users in a single query
-  - Use the Slack user IDs from `config.team.ovTeamMembers` (each member has a `slackId` field)
-  - For each PM, make a separate Slack search call with their individual `slackId` as the `user` parameter
-  - Example: Search for messages from "C0123456798" (team name) etc.
-  - Alternatively, search by channel ID and filter results to find messages from PMs
+- **CRITICAL: How to Search for Messages from Multiple Team Members (PMs)**
+  - The config provides team member data with Slack user IDs: `config.team.ovTeamMembers`
+  - Example: `[{name: "Alice", slackId: "U07STEFTECB"}, {name: "Bob", slackId: "U04GHUP0DGB"}]`
+  - **YOU MUST search for each PM INDIVIDUALLY** - Slack tools do NOT accept comma-separated user IDs or arrays
+  - Use the appropriate Slack tool parameter with a SINGLE user ID at a time
+  - For `mcp__Slack__conversations_search_messages`, use `filter_users_from: "U07STEFTECB"` (single ID)
+  - Call the tool multiple times (once per PM) to search all PMs
+  - DO NOT pass comma-separated user IDs like `"U07STEFTECB,U04GHUP0DGB,U01RK6S0RL6"` - this will fail
+  - Correct: `filter_users_from: "U07STEFTECB"` (single user ID)
+  - Wrong: `filter_users_from: "U07STEFTECB,U04GHUP0DGB,U01RK6S0RL6"` (comma-separated string)
+  - Alternatively, search by channel ID and manually filter results to find messages from specific PMs
 - Identify:
   - Features or updates launched
   - Launch date

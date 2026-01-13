@@ -179,6 +179,7 @@ Available Agents:
   - 1-1                            Prepare for a 1-1 meeting with a specific person (requires --email)
   - weekly-executive-summary       Generate executive summary from all reports for a specific calendar week (requires --week)
   - tts                            Convert a markdown report to speech using Hume AI (requires --report-file)
+  - good-vibes-recognition         Helps identify team members deserving recognition based on their recent contributions, achievements, and positive impact across Slack channels
 
 Examples:
   npm start

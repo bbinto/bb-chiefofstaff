@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 
+// Get API URL from environment variable, fallback to relative URL (uses proxy)
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 function Analytics({ password, onBack }) {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -16,7 +19,7 @@ function Analytics({ password, onBack }) {
       console.log('Analytics: Fetching reports...')
       setLoading(true)
       const headers = password ? { 'x-app-password': password } : {}
-      const response = await fetch('http://localhost:3001/api/reports', { headers })
+      const response = await fetch(`${API_URL}/api/reports`, { headers })
 
       console.log('Analytics: Response status:', response.status)
       if (!response.ok) throw new Error('Failed to fetch reports')
@@ -108,12 +111,12 @@ function Analytics({ password, onBack }) {
   // Get color for pie chart segments
   const getColor = (index) => {
     const colors = [
-      'bg-indigo-500',
-      'bg-purple-500',
-      'bg-pink-500',
-      'bg-blue-500',
-      'bg-cyan-500',
       'bg-teal-500',
+      'bg-cyan-500',
+      'bg-blue-500',
+      'bg-sky-500',
+      'bg-violet-500',
+      'bg-purple-500',
       'bg-green-500',
       'bg-lime-500',
       'bg-yellow-500',
@@ -131,7 +134,7 @@ function Analytics({ password, onBack }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-teal-200 border-t-[#00203F]"></div>
       </div>
     )
   }
@@ -151,7 +154,7 @@ function Analytics({ password, onBack }) {
         <div className="flex items-center gap-4">
           <button
             onClick={onBack}
-            className="text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-2"
+            className="text-[#00203F] hover:text-teal-700 font-medium flex items-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -173,7 +176,7 @@ function Analytics({ password, onBack }) {
               onClick={() => setTimeRange(option.value)}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                 timeRange === option.value
-                  ? 'bg-indigo-600 text-white'
+                  ? 'bg-[#00203F] text-white'
                   : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
               }`}
             >
@@ -189,10 +192,10 @@ function Analytics({ password, onBack }) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600 font-medium">Total Cost</p>
-              <p className="text-3xl font-bold text-indigo-600 mt-2">${totalCost.toFixed(4)}</p>
+              <p className="text-3xl font-bold text-[#00203F] mt-2">${totalCost.toFixed(4)}</p>
             </div>
-            <div className="bg-indigo-100 rounded-full p-3">
-              <svg className="w-8 h-8 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-teal-100 rounded-full p-3">
+              <svg className="w-8 h-8 text-[#00203F]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
@@ -203,10 +206,10 @@ function Analytics({ password, onBack }) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600 font-medium">Total Reports</p>
-              <p className="text-3xl font-bold text-purple-600 mt-2">{totalReports}</p>
+              <p className="text-3xl font-bold text-teal-600 mt-2">{totalReports}</p>
             </div>
-            <div className="bg-purple-100 rounded-full p-3">
-              <svg className="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-teal-100 rounded-full p-3">
+              <svg className="w-8 h-8 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </div>
@@ -217,10 +220,10 @@ function Analytics({ password, onBack }) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600 font-medium">Average Cost</p>
-              <p className="text-3xl font-bold text-pink-600 mt-2">${avgCost.toFixed(4)}</p>
+              <p className="text-3xl font-bold text-[#ADEFD1] mt-2">${avgCost.toFixed(4)}</p>
             </div>
-            <div className="bg-pink-100 rounded-full p-3">
-              <svg className="w-8 h-8 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="bg-[#ADEFD1]/20 rounded-full p-3">
+              <svg className="w-8 h-8 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
               </svg>
             </div>
@@ -291,7 +294,7 @@ function Analytics({ password, onBack }) {
                     <td className="py-3 px-3 font-medium text-gray-900">{agent.name}</td>
                     <td className="py-3 px-3 text-right text-gray-600">{agent.count}</td>
                     <td className="py-3 px-3 text-right text-gray-600">${(agent.avgCost || 0).toFixed(4)}</td>
-                    <td className="py-3 px-3 text-right font-semibold text-indigo-600">${(agent.totalCost || 0).toFixed(4)}</td>
+                    <td className="py-3 px-3 text-right font-semibold text-[#00203F]">${(agent.totalCost || 0).toFixed(4)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -303,36 +306,145 @@ function Analytics({ password, onBack }) {
         </div>
       </div>
 
-      {/* Daily Timeline */}
+      {/* Longitudinal Cost/Day Chart */}
       {dailyStatsArray.length > 0 && (
         <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200">
-          <h3 className="text-lg font-bold text-gray-900 mb-4">Daily Activity Timeline</h3>
+          <h3 className="text-lg font-bold text-gray-900 mb-4">Cost Per Day (Longitudinal View)</h3>
           <div className="overflow-x-auto">
-            <div className="flex gap-2 min-w-max pb-4">
-              {dailyStatsArray.map((day, index) => {
-                const maxCost = Math.max(...dailyStatsArray.map(d => d.cost))
-                const heightPercentage = maxCost > 0 ? (day.cost / maxCost) * 100 : 0
-
-                return (
-                  <div key={index} className="flex flex-col items-center gap-2 min-w-[60px]">
-                    <div className="flex flex-col items-center justify-end h-48 w-full">
-                      <div className="text-xs font-semibold text-gray-700 mb-1">${day.cost.toFixed(3)}</div>
-                      <div
-                        className="w-12 bg-gradient-to-t from-indigo-600 to-indigo-400 rounded-t-lg transition-all hover:from-indigo-700 hover:to-indigo-500 cursor-pointer relative group"
-                        style={{ height: `${heightPercentage}%`, minHeight: day.cost > 0 ? '8px' : '0' }}
-                        title={`${day.count} reports - $${day.cost.toFixed(4)}`}
-                      >
-                        <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block bg-gray-900 text-white text-xs rounded py-1 px-2 whitespace-nowrap">
-                          {day.count} report{day.count !== 1 ? 's' : ''}
-                        </div>
-                      </div>
+            <div className="relative h-64 w-full">
+              {/* Y-axis labels */}
+              <div className="absolute left-0 top-0 bottom-8 w-16 flex flex-col justify-between text-xs text-gray-600 font-medium">
+                {[...Array(5)].map((_, i) => {
+                  const maxCost = Math.max(...dailyStatsArray.map(d => d.cost))
+                  const value = maxCost * (1 - i / 4)
+                  return (
+                    <div key={i} className="text-right pr-2">
+                      ${value.toFixed(3)}
                     </div>
-                    <div className="text-xs text-gray-600 text-center transform -rotate-45 origin-top-left mt-4">
+                  )
+                })}
+              </div>
+
+              {/* Chart area */}
+              <div className="absolute left-16 right-0 top-0 bottom-8 border-l-2 border-b-2 border-gray-300">
+                {/* Horizontal grid lines */}
+                {[...Array(5)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="absolute left-0 right-0 border-t border-gray-200"
+                    style={{ top: `${(i / 4) * 100}%` }}
+                  />
+                ))}
+
+                {/* Line chart */}
+                <svg className="absolute inset-0 w-full h-full overflow-visible">
+                  {/* Area fill under the line */}
+                  <defs>
+                    <linearGradient id="costGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                      <stop offset="0%" stopColor="rgb(0, 32, 63)" stopOpacity="0.2" />
+                      <stop offset="100%" stopColor="rgb(0, 32, 63)" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
+
+                  {dailyStatsArray.length > 1 && (() => {
+                    const maxCost = Math.max(...dailyStatsArray.map(d => d.cost))
+                    const chartHeight = 100 // percentage
+                    const points = dailyStatsArray.map((day, i) => {
+                      const x = (i / (dailyStatsArray.length - 1)) * 100
+                      const y = chartHeight - (maxCost > 0 ? (day.cost / maxCost) * chartHeight : 0)
+                      return `${x},${y}`
+                    }).join(' ')
+
+                    const areaPoints = `0,${chartHeight} ${points} ${(dailyStatsArray.length - 1) / (dailyStatsArray.length - 1) * 100},${chartHeight}`
+
+                    return (
+                      <>
+                        {/* Area fill */}
+                        <polygon
+                          points={areaPoints}
+                          fill="url(#costGradient)"
+                        />
+
+                        {/* Line */}
+                        <polyline
+                          points={points}
+                          fill="none"
+                          stroke="rgb(0, 32, 63)"
+                          strokeWidth="2.5"
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                          vectorEffect="non-scaling-stroke"
+                        />
+
+                        {/* Data points */}
+                        {dailyStatsArray.map((day, i) => {
+                          const x = (i / (dailyStatsArray.length - 1)) * 100
+                          const y = chartHeight - (maxCost > 0 ? (day.cost / maxCost) * chartHeight : 0)
+                          return (
+                            <g key={i}>
+                              <circle
+                                cx={`${x}%`}
+                                cy={`${y}%`}
+                                r="4"
+                                fill="white"
+                                stroke="rgb(0, 32, 63)"
+                                strokeWidth="2"
+                                className="cursor-pointer hover:r-6 transition-all"
+                              />
+                              <circle
+                                cx={`${x}%`}
+                                cy={`${y}%`}
+                                r="12"
+                                fill="transparent"
+                                className="cursor-pointer"
+                              >
+                                <title>{`${day.date}: $${day.cost.toFixed(4)} (${day.count} report${day.count !== 1 ? 's' : ''})`}</title>
+                              </circle>
+                            </g>
+                          )
+                        })}
+                      </>
+                    )
+                  })()}
+                </svg>
+              </div>
+
+              {/* X-axis labels */}
+              <div className="absolute left-16 right-0 bottom-0 h-8 flex justify-between items-start">
+                {dailyStatsArray.map((day, i) => {
+                  // Show every nth label to avoid crowding
+                  const showLabel = dailyStatsArray.length <= 10 || i % Math.ceil(dailyStatsArray.length / 10) === 0
+                  if (!showLabel && i !== dailyStatsArray.length - 1) return null
+
+                  return (
+                    <div key={i} className="text-xs text-gray-600 transform -rotate-45 origin-top-left mt-2 whitespace-nowrap">
                       {day.date}
                     </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Summary stats below chart */}
+          <div className="mt-6 pt-4 border-t border-gray-200 grid grid-cols-3 gap-4">
+            <div>
+              <p className="text-xs text-gray-600 font-medium">Average Cost/Day</p>
+              <p className="text-lg font-bold text-[#00203F] mt-1">
+                ${(dailyStatsArray.reduce((sum, d) => sum + d.cost, 0) / dailyStatsArray.length).toFixed(4)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600 font-medium">Highest Cost Day</p>
+              <p className="text-lg font-bold text-teal-600 mt-1">
+                ${Math.max(...dailyStatsArray.map(d => d.cost)).toFixed(4)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-600 font-medium">Lowest Cost Day</p>
+              <p className="text-lg font-bold text-green-600 mt-1">
+                ${Math.min(...dailyStatsArray.map(d => d.cost)).toFixed(4)}
+              </p>
             </div>
           </div>
         </div>
@@ -348,7 +460,7 @@ function Analytics({ password, onBack }) {
             .map((report, index) => (
               <div key={report.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                 <div className="flex items-center gap-3">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-bold text-sm">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-teal-100 text-[#00203F] font-bold text-sm">
                     {index + 1}
                   </div>
                   <div>
@@ -357,7 +469,7 @@ function Analytics({ password, onBack }) {
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-bold text-indigo-600">${(report.cost || 0).toFixed(4)}</div>
+                  <div className="font-bold text-[#00203F]">${(report.cost || 0).toFixed(4)}</div>
                 </div>
               </div>
             ))}

@@ -22,7 +22,7 @@ export const exportToPDF = async (filename, agentName, timestamp) => {
     loadingElement.className = 'fixed top-0 left-0 w-full h-full bg-black bg-opacity-50 flex items-center justify-center z-50';
     loadingElement.innerHTML = `
       <div class="bg-white rounded-lg p-6 shadow-xl">
-        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-600 mb-4"></div>
         <p class="text-gray-700">Generating PDF...</p>
       </div>
     `;

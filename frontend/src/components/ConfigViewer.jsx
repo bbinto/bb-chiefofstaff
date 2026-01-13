@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
 
+// Get API URL from environment variable, fallback to relative URL (uses proxy)
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 function ConfigViewer({ password, onBack }) {
   const [config, setConfig] = useState(null)
   const [editedConfig, setEditedConfig] = useState('')
@@ -20,7 +23,7 @@ function ConfigViewer({ password, onBack }) {
     try {
       setLoading(true)
       const headers = password ? { 'x-app-password': password } : {}
-      const response = await fetch('http://localhost:3001/api/config', { headers })
+      const response = await fetch(`${API_URL}/api/config`, { headers })
 
       if (!response.ok) throw new Error('Failed to fetch config')
       const data = await response.json()
@@ -55,7 +58,7 @@ function ConfigViewer({ password, onBack }) {
         ...(password ? { 'x-app-password': password } : {})
       }
 
-      const response = await fetch('http://localhost:3001/api/config', {
+      const response = await fetch(`${API_URL}/api/config`, {
         method: 'PUT',
         headers,
         body: JSON.stringify(parsedConfig)
@@ -161,7 +164,7 @@ function ConfigViewer({ password, onBack }) {
               <div className="space-y-3">
                 {Object.entries(sectionData).map(([key, value]) => (
                   <div key={key} className="flex flex-col">
-                    <span className="font-medium text-sm text-indigo-600 mb-1">{key}:</span>
+                    <span className="font-medium text-sm text-[#00203F] mb-1">{key}:</span>
                     <div className="ml-4 text-sm">
                       {typeof value === 'object' && !Array.isArray(value) ? (
                         <div className="bg-gray-50 rounded p-3 space-y-2">
@@ -193,8 +196,8 @@ function ConfigViewer({ password, onBack }) {
       <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-xl shadow-lg p-8">
           <div className="flex items-center justify-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600"></div>
-            <p className="ml-4 text-indigo-700 font-medium">Loading configuration...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-teal-200 border-t-[#00203F]"></div>
+            <p className="ml-4 text-[#00203F] font-medium">Loading configuration...</p>
           </div>
         </div>
       </div>
@@ -210,7 +213,7 @@ function ConfigViewer({ password, onBack }) {
             <p className="text-gray-700 font-medium">{error}</p>
             <button
               onClick={onBack}
-              className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+              className="mt-4 px-4 py-2 bg-[#00203F] text-white rounded-lg hover:bg-teal-700"
             >
               Go Back
             </button>
@@ -224,7 +227,7 @@ function ConfigViewer({ password, onBack }) {
     <div className="max-w-7xl mx-auto">
       <div className="bg-white rounded-xl shadow-lg overflow-hidden">
         {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-4 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-[#00203F] to-teal-600 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
               onClick={onBack}
@@ -237,7 +240,7 @@ function ConfigViewer({ password, onBack }) {
             </button>
             <div>
               <h2 className="text-2xl font-bold text-white">Configuration</h2>
-              <p className="text-indigo-100 text-sm">View and edit config.json</p>
+              <p className="text-[#ADEFD1] text-sm">View and edit config.json</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -303,7 +306,7 @@ function ConfigViewer({ password, onBack }) {
               <textarea
                 value={editedConfig}
                 onChange={(e) => setEditedConfig(e.target.value)}
-                className="w-full h-[600px] p-4 font-mono text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                className="w-full h-[600px] p-4 font-mono text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent"
                 spellCheck={false}
               />
               <p className="mt-2 text-sm text-gray-500">
@@ -318,7 +321,7 @@ function ConfigViewer({ password, onBack }) {
                 </p>
                 <button
                   onClick={toggleAllSections}
-                  className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  className="text-sm text-[#00203F] hover:text-teal-700 font-medium"
                 >
                   {Object.values(expandedSections).every(v => v) ? 'Collapse All' : 'Expand All'}
                 </button>

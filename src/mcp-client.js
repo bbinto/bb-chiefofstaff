@@ -185,8 +185,18 @@ export class MCPClientManager {
    * Call an MCP tool
    */
   async callTool(toolName, args = {}) {
+    // Debug: Log tool name details
+    console.log(`\n📞 MCP callTool received: "${toolName}" (length: ${toolName.length}, first char code: ${toolName.charCodeAt(0)})`);
+
     const toolInfo = this.tools.get(toolName);
     if (!toolInfo) {
+      // Debug: Show available tool names that start with similar prefixes
+      const similarTools = Array.from(this.tools.keys()).filter(name =>
+        name.includes('Slack') || name.includes('conversations_search')
+      );
+      console.error(`\n❌ Tool "${toolName}" not found!`);
+      console.error(`📋 Similar available tools:`, similarTools.slice(0, 5).join(', '));
+      console.error(`📋 First 5 registered tools:`, Array.from(this.tools.keys()).slice(0, 5).join(', '));
       throw new Error(`Tool ${toolName} not found. Available tools: ${Array.from(this.tools.keys()).join(', ')}`);
     }
 

@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import mariLogo from '../img/mari-128.png'
 
+// Get API URL from environment variable, fallback to relative URL (uses proxy)
+const API_URL = import.meta.env.VITE_API_URL || ''
+
 function Login({ onLogin }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -13,7 +16,7 @@ function Login({ onLogin }) {
 
     try {
       // Test the password by making a request to the API
-      const response = await fetch('http://localhost:3001/api/agents', {
+      const response = await fetch(`${API_URL}/api/agents`, {
         headers: {
           'x-app-password': password
         }
@@ -34,8 +37,8 @@ function Login({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center px-4">
-      <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full border border-indigo-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50 to-cyan-50 flex items-center justify-center px-4">
+      <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full border border-teal-100">
         <div className="text-center mb-8">
           <img
             src={mariLogo}
@@ -56,7 +59,7 @@ function Login({ onLogin }) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition-all"
               placeholder="Enter password"
               autoFocus
               disabled={loading}
@@ -72,7 +75,7 @@ function Login({ onLogin }) {
           <button
             type="submit"
             disabled={!password || loading}
-            className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 rounded-lg font-medium hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl"
+            className="w-full bg-gradient-to-r from-[#00203F] to-teal-600 text-white py-3 rounded-lg font-medium hover:from-teal-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl"
           >
             {loading ? (
               <span className="flex items-center justify-center">
