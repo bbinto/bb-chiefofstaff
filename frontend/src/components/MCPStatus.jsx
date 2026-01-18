@@ -7,6 +7,9 @@ function MCPStatus({ password, onBack }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [expandedServers, setExpandedServers] = useState(new Set())
+  const [refreshing, setRefreshing] = useState(false)
+  const [clearingCache, setClearingCache] = useState(false)
+  const [actionMessage, setActionMessage] = useState(null)
 
   const checkMCPStatus = async () => {
     try {
@@ -41,6 +44,172 @@ function MCPStatus({ password, onBack }) {
       }
       return newSet
     })
+  }
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    setActionMessage(null)
+    setError(null)
+
+    try {
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/mcp-refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        }
+      })
+
+      if (response.status === 401) {
+        throw new Error('Authentication failed')
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.details || errorData.error || 'Failed to refresh MCP connections')
+      }
+
+      const data = await response.json()
+      setActionMessage({
+        type: 'success',
+        message: `✓ ${data.message}. Connected to ${data.connectedServers} server(s) with ${data.availableTools} tools.`
+      })
+
+      // Refresh status after successful refresh
+      setTimeout(() => {
+        checkMCPStatus()
+      }, 1000)
+    } catch (err) {
+      setError(err.message)
+      setActionMessage({
+        type: 'error',
+        message: `✗ Error: ${err.message}`
+      })
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
+  const handleClearCache = async () => {
+    if (!confirm('Clear Slack MCP cache? This will force refetch of channels and users on next connection.')) {
+      return
+    }
+
+    setClearingCache(true)
+    setActionMessage(null)
+    setError(null)
+
+    try {
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/mcp-clear-cache`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        }
+      })
+
+      if (response.status === 401) {
+        throw new Error('Authentication failed')
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.details || errorData.error || 'Failed to clear cache')
+      }
+
+      const data = await response.json()
+      setActionMessage({
+        type: 'success',
+        message: `✓ ${data.message}${data.clearedFiles && data.clearedFiles.length > 0 ? ` (${data.clearedFiles.join(', ')})` : ''}.`
+      })
+    } catch (err) {
+      setError(err.message)
+      setActionMessage({
+        type: 'error',
+        message: `✗ Error: ${err.message}`
+      })
+    } finally {
+      setClearingCache(false)
+    }
+  }
+
+  const handleFullRefresh = async () => {
+    if (!confirm('Clear cache and refresh all MCP connections? This will force refetch of Slack channels/users and reconnect all servers.')) {
+      return
+    }
+
+    // First clear cache
+    setClearingCache(true)
+    setRefreshing(false)
+    setActionMessage(null)
+    setError(null)
+
+    try {
+      const headers = password ? { 'x-app-password': password } : {}
+
+      // Step 1: Clear cache
+      const clearResponse = await fetch(`${API_URL}/api/mcp-clear-cache`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        }
+      })
+
+      if (!clearResponse.ok) {
+        const errorData = await clearResponse.json().catch(() => ({}))
+        throw new Error(errorData.details || errorData.error || 'Failed to clear cache')
+      }
+
+      const clearData = await clearResponse.json()
+      setActionMessage({
+        type: 'success',
+        message: `✓ Cache cleared. Refreshing connections...`
+      })
+
+      // Step 2: Refresh connections
+      setClearingCache(false)
+      setRefreshing(true)
+
+      const refreshResponse = await fetch(`${API_URL}/api/mcp-refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        }
+      })
+
+      if (refreshResponse.status === 401) {
+        throw new Error('Authentication failed')
+      }
+
+      if (!refreshResponse.ok) {
+        const errorData = await refreshResponse.json().catch(() => ({}))
+        throw new Error(errorData.details || errorData.error || 'Failed to refresh connections')
+      }
+
+      const refreshData = await refreshResponse.json()
+      setActionMessage({
+        type: 'success',
+        message: `✓ Full refresh complete! Connected to ${refreshData.connectedServers} server(s) with ${refreshData.availableTools} tools.`
+      })
+
+      // Refresh status after successful refresh
+      setTimeout(() => {
+        checkMCPStatus()
+      }, 1000)
+    } catch (err) {
+      setError(err.message)
+      setActionMessage({
+        type: 'error',
+        message: `✗ Error: ${err.message}`
+      })
+    } finally {
+      setClearingCache(false)
+      setRefreshing(false)
+    }
   }
 
   useEffect(() => {
@@ -108,16 +277,51 @@ function MCPStatus({ password, onBack }) {
             Last checked: {status?.timestamp ? new Date(status.timestamp).toLocaleString() : 'Never'}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
-            onClick={checkMCPStatus}
-            disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
+            onClick={handleFullRefresh}
+            disabled={loading || refreshing || clearingCache}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#00203F] to-teal-700 text-white rounded-lg hover:from-teal-700 hover:to-teal-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            title="Clear Slack cache and refresh all MCP connections"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            {(refreshing || clearingCache) ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            )}
+            Full Refresh
+          </button>
+          <button
+            onClick={handleRefresh}
+            disabled={loading || refreshing || clearingCache}
+            className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Refresh MCP connections"
+          >
+            {refreshing ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            )}
             Refresh
+          </button>
+          <button
+            onClick={handleClearCache}
+            disabled={loading || refreshing || clearingCache}
+            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Clear Slack MCP cache files (channels and users)"
+          >
+            {clearingCache ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+            ) : (
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            )}
+            Clear Cache
           </button>
           <button
             onClick={onBack}
@@ -130,6 +334,27 @@ function MCPStatus({ password, onBack }) {
           </button>
         </div>
       </div>
+
+      {/* Action Messages */}
+      {actionMessage && (
+        <div className={`mb-6 p-4 rounded-lg border ${
+          actionMessage.type === 'success' 
+            ? 'bg-green-50 border-green-200 text-green-800' 
+            : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{actionMessage.message}</span>
+            <button
+              onClick={() => setActionMessage(null)}
+              className="ml-auto text-gray-500 hover:text-gray-700"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">

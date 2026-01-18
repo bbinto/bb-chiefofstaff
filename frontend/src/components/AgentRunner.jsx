@@ -6,10 +6,13 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 function AgentRunner({ password, onClose }) {
   const [agents, setAgents] = useState([
     { name: 'prep-for-week', displayName: 'Prep for the Week', description: 'Prepare for upcoming week with todos, calendar, and 1-1 notes', lastRun: null },
+    { name: 'daily-brief', displayName: 'Daily Brief', description: 'Super concise daily brief with top 2 items from news, Slack, and Jira from yesterday', lastRun: null },
     { name: 'weekly-recap', displayName: 'Weekly Recap', description: 'Weekly team catch-up and recap', lastRun: null },
     { name: 'business-health', displayName: 'Business Health', description: 'Officevibe business and product health', requiresParam: 'manualSourcesFolder', lastRun: null },
     { name: 'product-engineering', displayName: 'Product Engineering', description: 'Product development and engineering updates', lastRun: null },
     { name: 'telemetry-deepdive', displayName: 'Telemetry Deep Dive', description: 'Deep dive into telemetry data', requiresParam: 'folder', lastRun: null },
+    { name: 'telemetry-from-slack', displayName: 'Telemetry from Slack', description: 'Analyze Mixpanel updates from Slack telemetry channels (last 24 hours)', lastRun: null },
+    { name: 'mixpanel-query', displayName: 'Mixpanel Query', description: 'Query Mixpanel analytics for retention, usage, and feature metrics', lastRun: null },
     { name: 'team-pulse', displayName: 'Team Pulse', description: 'Team engagement and pulse survey analysis', lastRun: null },
     { name: 'pingboard-migration', displayName: 'Pingboard Migration', description: 'Pingboard migration status', lastRun: null },
     { name: 'jira-tracker', displayName: 'Jira Tracker', description: 'Track Jira issues and progress', lastRun: null },
@@ -22,8 +25,10 @@ function AgentRunner({ password, onClose }) {
     { name: 'officevibe-strategy-roadmap', displayName: 'Officevibe Strategy Roadmap', description: 'Strategy roadmap for Officevibe', lastRun: null },
     { name: 'slack-user-analysis', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', lastRun: null },
     { name: '1-1', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', lastRun: null },
+    { name: 'epp', displayName: 'Employee Personality Profile', description: 'Generate personality profile using Myers-Briggs and Insights frameworks', requiresParam: 'email', lastRun: null },
     { name: 'weekly-executive-summary', displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
-    { name: 'good-vibes-recognition', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null }
+    { name: 'good-vibes-recognition', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null },
+    { name: 'mydailyhealth', displayName: 'My Daily Health', description: 'Review yesterday\'s health information and today\'s predictions from Oura, Withings, and Strava', isPrivate: true, lastRun: null }
      
   ])
 
@@ -288,10 +293,18 @@ function AgentRunner({ password, onClose }) {
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium text-gray-900 text-sm">
+                      <div className="font-medium text-gray-900 text-sm flex items-center gap-1.5">
                         {agent.displayName}
                         {agent.requiresParam && (
-                          <span className="ml-2 text-xs text-orange-600 font-normal">*</span>
+                          <span className="text-xs text-orange-600 font-normal">*</span>
+                        )}
+                        {agent.isPrivate && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 border border-purple-300" title="Private - This agent only accesses health data and is kept confidential">
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                            </svg>
+                            Private
+                          </span>
                         )}
                       </div>
                       <div className={`text-xs font-medium ${

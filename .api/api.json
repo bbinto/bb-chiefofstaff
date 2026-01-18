@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "apis": [
+    {
+      "identifier": "officevibe",
+      "source": "@officevibe/v2#4768a1cmay5fwnj",
+      "integrity": "sha512-M7BRvkaNI6LeHWtU1sULPA3kuFMFjmbx5j2a1CQlfSqpLYF9s1QeV8CrR3Do0S3NQtlkQYvs/ECET1uxQOiilA==",
+      "installerVersion": "6.1.3"
+    }
+  ]
+}

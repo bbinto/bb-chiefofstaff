@@ -1,6 +1,32 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script type="module">
+      import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+      mermaid.initialize({ 
+        startOnLoad: false, // We'll manually trigger rendering
+        theme: 'default',
+        securityLevel: 'loose',
+        flowchart: {
+          useMaxWidth: true,
+          htmlLabels: true
+        },
+        sequence: {
+          useMaxWidth: true
+        },
+        gantt: {
+          useMaxWidth: true
+        },
+        xyChart: {
+          useMaxWidth: true,
+          width: 700,
+          height: 500
+        }
+      });
+      // Expose mermaid globally so React can access it
+      window.mermaid = mermaid;
+      console.log('Mermaid initialized and exposed to window.mermaid');
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,6 +34,7 @@
   </head>
   <body>
     <div id="root"></div>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -55,6 +55,9 @@ function ReportList({ reports, onReportSelect }) {
       'business-health': 'from-teal-500 to-teal-500',
       'product-engineering': 'from-teal-500 to-teal-500',
       'okr-progress': 'from-orange-500 to-teal-500',
+      'telemetry-from-slack': 'from-purple-500 to-teal-500',
+      'telemetry-deepdive': 'from-purple-500 to-teal-500',
+      'mixpanel-query': 'from-purple-500 to-teal-500',
     }
     return colors[agentName] || 'from-teal-500 to-teal-500'
   }

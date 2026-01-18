@@ -10,13 +10,74 @@ import { MCP_DEFAULTS } from './utils/constants.js';
  * Loads and connects to MCP servers configured in Claude Desktop
  */
 export class MCPClientManager {
-  constructor() {
+  constructor(config = null) {
     this.clients = new Map();
     this.tools = new Map();
+    this.config = config; // Store config to inject credentials
     // Configurable timeout settings (in milliseconds)
     this.connectionTimeout = parseInt(process.env.MCP_CONNECTION_TIMEOUT || MCP_DEFAULTS.CONNECTION_TIMEOUT, 10);
     this.maxRetries = parseInt(process.env.MCP_MAX_RETRIES || MCP_DEFAULTS.MAX_RETRIES, 10);
     this.retryDelay = parseInt(process.env.MCP_RETRY_DELAY || MCP_DEFAULTS.RETRY_DELAY, 10);
+  }
+
+  /**
+   * Get Mixpanel environment variables from config
+   * @param {string} serverName - Name of the MCP server
+   * @returns {object} Environment variables for Mixpanel
+   */
+  getMixpanelEnvVars(serverName) {
+    // Check if this is a Mixpanel MCP server
+    const isMixpanelServer = serverName.toLowerCase().includes('mixpanel');
+    
+    if (!isMixpanelServer || !this.config?.mixpanel) {
+      return {};
+    }
+
+    const mixpanelConfig = this.config.mixpanel;
+    const envVars = {};
+
+    // Inject Mixpanel credentials as environment variables
+    // The Mixpanel MCP server expects these from config.mixpanel in config.json
+    // Common environment variable names that Mixpanel MCP servers might use:
+    if (mixpanelConfig.projectId) {
+      // Primary: Most common naming convention
+      envVars.MIXPANEL_PROJECT_ID = mixpanelConfig.projectId;
+      // Alternatives: Different MCP servers might use different names
+      envVars.MIXPANEL_PROJECTID = mixpanelConfig.projectId;
+      envVars.PROJECT_ID = mixpanelConfig.projectId;
+      envVars.MIXPANEL_PROJECT = mixpanelConfig.projectId;
+      // Handle the placeholder replacement case
+      envVars.__CONFIG_projectId__ = mixpanelConfig.projectId;
+    }
+
+    if (mixpanelConfig.username) {
+      envVars.MIXPANEL_USERNAME = mixpanelConfig.username;
+      envVars.MIXPANEL_USER = mixpanelConfig.username;
+      envVars.USERNAME = mixpanelConfig.username;
+      envVars.__CONFIG_username__ = mixpanelConfig.username;
+    }
+
+    if (mixpanelConfig.pwd) {
+      envVars.MIXPANEL_PASSWORD = mixpanelConfig.pwd;
+      envVars.MIXPANEL_PWD = mixpanelConfig.pwd;
+      envVars.MIXPANEL_SECRET = mixpanelConfig.pwd;
+      envVars.PASSWORD = mixpanelConfig.pwd;
+      envVars.__CONFIG_pwd__ = mixpanelConfig.pwd;
+    }
+
+    // Also set config path variables that some MCP servers might use
+    if (this.config) {
+      const configPath = path.join(process.cwd(), 'config.json');
+      envVars.CONFIG_PATH = configPath;
+      envVars.MIXPANEL_CONFIG_PATH = configPath;
+    }
+
+    if (Object.keys(envVars).length > 0) {
+      console.log(`  📝 Injecting Mixpanel credentials for ${serverName}`);
+      console.log(`     Project ID: ${mixpanelConfig.projectId || 'Not set'}`);
+    }
+
+    return envVars;
   }
 
   /**
@@ -127,10 +188,13 @@ export class MCPClientManager {
   async connectToServer(serverName, serverConfig) {
     const { command, args = [], env = {} } = serverConfig;
 
+    // Inject Mixpanel credentials from config if this is a Mixpanel MCP server
+    const mixpanelEnv = this.getMixpanelEnvVars(serverName);
+    
     const transport = new StdioClientTransport({
       command,
       args,
-      env: { ...process.env, ...env }
+      env: { ...process.env, ...env, ...mixpanelEnv }
     });
 
     const client = new Client({

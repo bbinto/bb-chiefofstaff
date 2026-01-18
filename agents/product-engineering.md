@@ -119,10 +119,16 @@ To check for out of office status:
   - Use channels from `config.slack.channels.productFeedback` for product feedback
   - Calculate the date N days ago (where N = `config.settings.defaultDays`) and use ISO format (e.g., `after: "2025-12-19"` for searches if defaultDays is 4)
   - Use the current date to calculate: current date minus N days (where N = `config.settings.defaultDays`) = start date
+- **Apply "Look for hard feedback" principle** (from Lenny's podcast): When analyzing product feedback:
+  - Pay special attention to feedback that contradicts your assumptions about the launch
+  - Look for surprising patterns or unexpected reactions
+  - Identify feedback that might be uncomfortable but reveals important blind spots
+  - Focus on feedback that challenges the status quo or suggests fundamental issues
 - **CRITICAL: Channel IDs vs Names**
   - You MUST use Slack channel IDs (format: "C0123456798"), NOT channel names (like "#product-general")
   - The config provides channel IDs in arrays: `config.slack.channels.productGeneral` contains IDs like ["C0123456798", "C0123456798"]
-  - When calling Slack MCP tools, use the channel ID directly (e.g., `channel: "C0123456798"`), NOT the name
+  - When calling Slack MCP tools, use the channel ID with the parameter name `channel_id` (e.g., `channel_id: "C0123456798"`), NOT `channel` and NOT the name
+  - **CRITICAL**: The Slack MCP server requires `channel_id` as the parameter name, NOT `channel`
   - DO NOT convert channel IDs to names or use channel names in any MCP tool calls
 - **CRITICAL: How to Search for Messages from Multiple Team Members (PMs)**
   - The config provides team member data with Slack user IDs: `config.team.ovTeamMembers`
@@ -150,12 +156,16 @@ To check for out of office status:
   - Features with significant decrease in usage (>20%)
   - New feature adoption rates
   - User engagement trends
-
+- **Apply "Don't be the frog" principle** (from Lenny's podcast): Monitor trends and patterns over time:
+  - Track whether usage changes are gradual (like a slowly heating pot) or sudden
+  - Identify if there are gradual declines that might indicate users are slowly disengaging
+  - Look for patterns that suggest the "temperature" of feature adoption is changing
+  - Monitor if trends are accelerating, decelerating, or stable
 - For each significant change:
   - Feature name
   - Change percentage
   - Possible reasons for change
-  - Recommended actions
+  - Recommended actions (contextual to the specific feature and situation)
 
 
   ### 4. Productivity & Resource Availability
@@ -229,6 +239,11 @@ Provide a structured summary. **CRITICAL FORMAT REQUIREMENT: You MUST begin your
 1. [Priority recommendation]
 2. [Priority recommendation]
 3. [Priority recommendation]
+- **Apply "Contextual advice" principle** (from Lenny's podcast): Ensure all recommendations are contextual:
+  - Base recommendations on the actual data and patterns observed, not generic best practices
+  - Consider the specific context of each feature, team capacity, and current priorities
+  - Make recommendations tailored to the unique circumstances revealed in the analysis
+  - Avoid generic advice - make it specific to what the data shows about each feature and team
 
 ## Output Delivery
 - MD files

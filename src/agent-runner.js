@@ -197,6 +197,14 @@ export class AgentRunner {
       }
     }
 
+    if (agentName === 'epp') {
+      if (this.agentParams.email) {
+        parameterMessage = `\n\n**IMPORTANT: Email Parameter**\nThe email address for the Employee Personality Profile is: ${this.agentParams.email}\nPlease use this email to:\n1. Find the person's information from config.team.ovTeamMembers, config.team.OVEntireTeam, or config.team["1-1s"]\n2. Get their Slack ID (slackId) from the config\n3. If not found in config, use Slack MCP tools to search for the user by email\n4. Analyze all their Slack messages, contributions, comments, actions, and responses in the specified date range\n5. Generate a comprehensive personality profile using Myers-Briggs and Insights Discovery frameworks.`;
+      } else {
+        parameterMessage = `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to analyze before proceeding. The email can match someone in the team configuration (config.team.ovTeamMembers, config.team.OVEntireTeam, or config.team["1-1s"]), or you can search for them using Slack MCP tools.`;
+      }
+    }
+
     if (agentName === 'weekly-executive-summary') {
       console.log('[AgentRunner] Processing weekly-executive-summary agent. this.agentParams:', this.agentParams);
       console.log('[AgentRunner] this.agentParams.week value:', this.agentParams.week);
@@ -386,6 +394,7 @@ export class AgentRunner {
       const endTime = Date.now(); // Track execution end time
       const executionTimeMs = endTime - startTime;
       const executionTimeSec = (executionTimeMs / 1000).toFixed(2);
+      const executionTimeMin = (executionTimeMs / 60000).toFixed(2);
 
       const result = {
         agentName,
@@ -393,7 +402,8 @@ export class AgentRunner {
         output: textContent,
         usage: response.usage,
         executionTimeMs,
-        executionTimeSec
+        executionTimeSec,
+        executionTimeMin
       };
       
       // Include agent-specific parameters in result for reporting
@@ -512,6 +522,7 @@ export class AgentRunner {
     const productGeneral = (slackChannels.productGeneral || []).join(', ');
     const productFeedback = (slackChannels.productFeedback || []).join(', ');
     const teamChannels = (slackChannels.teamChannels || []).join(', ');
+    const telemetryChannels = (slackChannels.telemetryChannels || []).join(', ');
 
     const dateRangeText = `Start: ${startDateISO} | End: ${endDateISO}${threeDaysAgoISO ? ` | 3d ago from end: ${threeDaysAgoISO}` : ''}`;
     console.log('[AgentRunner] Calculated date range:', { startDateISO, endDateISO, threeDaysAgoISO, dateRangeText });
@@ -547,6 +558,7 @@ Product general channels: ${productGeneral || 'None'}
 Product feedback channels: ${productFeedback || 'None'}
 Sales channels: ${salesChannels || 'None'}
 CSM channels: ${csmChannels || 'None'}
+Telemetry channels: ${telemetryChannels || 'None'}
 My user ID: ${this.config.slack?.myslackuserId || 'N/A'}
 **IMPORTANT: All channel values above are Slack channel IDs (format: C075SE700NM). Use these IDs directly in MCP tool calls, NOT channel names.**
 
@@ -562,14 +574,59 @@ Space: ${this.config.confluence?.spaceKey || 'N/A'}
 ## Hubspot
 Product filter: ${this.config.hubspot?.productFilter || 'N/A'}
 
+## Mixpanel
+Project ID: ${this.config.mixpanel?.projectId || 'N/A'}
+Username: ${this.config.mixpanel?.username ? 'Set' : 'N/A'}
+**CRITICAL: When calling Mixpanel MCP tools, ALWAYS include the projectId parameter using the value from config.mixpanel.projectId (${this.config.mixpanel?.projectId || 'NOT SET - CHECK CONFIG'}). The projectId is required for all Mixpanel queries.**
+
 ## Thought Leadership
 RSS Feeds: ${(this.config.thoughtleadership?.rssFeeds || []).join(', ') || 'None'}
+HR News RSS: ${(this.config.thoughtleadership?.hrNewsRSS || []).join(', ') || 'None'}
+AI Critics: ${(this.config.thoughtleadership?.AICritics || []).join(', ') || 'None'}
 Web Sources: ${(this.config.thoughtleadership?.webSources || []).join(', ') || 'None'}
 Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || []).join(', ') || 'None'}
+**CRITICAL: ONLY use RSS feeds listed above. DO NOT search for or use any RSS feeds not explicitly listed here.**
+
+## Releases
+${(() => {
+      const releases = this.config.releases || {};
+      if (Object.keys(releases).length === 0) {
+        return 'None';
+      }
+      // Format releases as a readable list
+      return Object.entries(releases)
+        .map(([key, release]) => {
+          const name = release.name || key;
+          const date = release.date || 'N/A';
+          const type = release.type || 'unknown';
+          const description = release.description || '';
+          return `- ${name} (${date}, ${type})${description ? `: ${description}` : ''}`;
+        })
+        .sort((a, b) => {
+          // Sort by date (extract date from string)
+          const dateA = a.match(/\(([0-9-]+),/)?.[1] || '';
+          const dateB = b.match(/\(([0-9-]+),/)?.[1] || '';
+          return dateB.localeCompare(dateA); // Descending order (newest first)
+        })
+        .join('\n');
+    })()}
+**IMPORTANT: Release data is available in config.releases. Each release has: name, date (YYYY-MM-DD format), type (major/minor), and description. Use this data to correlate release dates with business metrics (ARR growth, deal activity, churn patterns).**
 
 ## Dates (CRITICAL)
 **Current Date/Time**: Today is ${todayISO}. The current date and time information is already provided here - DO NOT call any date/time retrieval tools (like get_current_time or similar).
 **Analysis Period**: Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date range (period) from ${startDateISO} to ${endDateISO} (includes both start and end dates). When querying data sources, use parameters like after: "${startDateISO}" (inclusive) and before: "${endDateISO}" or onOrBefore: "${endDateISO}" (depending on API) to query data within this period.${threeDaysAgoISO ? ` For "last 3 days", use "${threeDaysAgoISO}".` : ''}`;
+  }
+
+  /**
+   * Normalize MCP server name for flexible matching
+   * Handles common variations like "withings-mcp", "mcp-withings", "oura-ring", etc.
+   */
+  normalizeServerName(serverName) {
+    return serverName.toLowerCase()
+      .replace(/^mcp[-_]?/, '')  // Remove "mcp-" or "mcp_" prefix
+      .replace(/[-_]mcp$/, '')   // Remove "-mcp" or "_mcp" suffix
+      .replace(/[-_]/g, '')      // Remove all dashes and underscores
+      .trim();
   }
 
   /**
@@ -579,14 +636,72 @@ Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || 
   buildToolsSchema(agentName) {
     const availableTools = this.mcpClient.getAvailableTools();
 
-    // DISABLED: Tool filtering was causing issues with Slack tools not matching the prefix pattern
-    // Keeping all tools available to ensure agents can access all necessary MCP tools
-    // The small token overhead (~10k tokens) is worth avoiding tool access issues
+    // Define health agents (only use health MCPs)
+    const healthAgents = ['mydailyhealth'];
+    
+    // Get MCP configuration from config
+    const mcpConfig = this.config?.mcp || {};
+    const healthServers = mcpConfig.health?.servers || [];
+    const workServers = mcpConfig.work?.servers || [];
 
     let filteredTools = availableTools;
 
-    // Note: Previously tried filtering to reduce token usage, but it broke Slack tool access
-    // Tools like 'slack_list_users' don't start with 'mcp__Slack__' prefix
+    // For health agents, only include health MCP servers
+    if (healthAgents.includes(agentName)) {
+      // First, log all available MCP servers for debugging
+      const allServers = [...new Set(availableTools.map(t => t.server))];
+      console.log(`[buildToolsSchema] All available MCP servers: ${allServers.join(', ')}`);
+      
+      // Normalize configured health server names for matching
+      const normalizedHealthServers = healthServers.map(s => this.normalizeServerName(s));
+      
+      // Filter to only include tools from health MCP servers
+      // Use flexible matching with normalization
+      filteredTools = availableTools.filter(tool => {
+        const normalizedServerName = this.normalizeServerName(tool.server);
+        return normalizedHealthServers.some(normalizedHealthServer => {
+          // Check if normalized server name contains the health server keyword, or vice versa
+          return normalizedServerName.includes(normalizedHealthServer) || 
+                 normalizedHealthServer.includes(normalizedServerName) ||
+                 // Also check original names for exact matches
+                 tool.server.toLowerCase().includes(normalizedHealthServer) ||
+                 normalizedHealthServer.includes(tool.server.toLowerCase());
+        });
+      });
+      
+      // Log which servers matched
+      const matchedServers = [...new Set(filteredTools.map(t => t.server))];
+      const unmatchedHealthServers = healthServers.filter(healthServer => {
+        const normalized = this.normalizeServerName(healthServer);
+        return !matchedServers.some(server => {
+          const normalizedServer = this.normalizeServerName(server);
+          return normalizedServer.includes(normalized) || normalized.includes(normalizedServer);
+        });
+      });
+      
+      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: ${healthServers.length} configured health MCP servers (${healthServers.join(', ')}), ${matchedServers.length} matched servers (${matchedServers.join(', ')}), ${filteredTools.length} tools available`);
+      if (unmatchedHealthServers.length > 0) {
+        console.warn(`[buildToolsSchema] ⚠️  Health MCP servers configured but not found/connected: ${unmatchedHealthServers.join(', ')}`);
+        console.warn(`[buildToolsSchema] ⚠️  Please verify these servers are configured in Claude Desktop and connected successfully`);
+      }
+    } else {
+      // For work agents, exclude health MCP servers
+      filteredTools = availableTools.filter(tool => {
+        const serverName = tool.server.toLowerCase();
+        return !healthServers.some(healthServer => 
+          serverName.includes(healthServer.toLowerCase())
+        );
+      });
+      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: excluded health MCPs (${healthServers.join(', ')}), ${filteredTools.length} tools available`);
+    }
+
+    // For telemetry-from-slack agent, exclude tools from "mixpanel-mcp" server
+    // Use only tools from "mixpanel" server for Mixpanel operations
+    if (agentName === 'telemetry-from-slack') {
+      filteredTools = filteredTools.filter(tool => tool.server !== 'mixpanel-mcp');
+      const mixpanelTools = filteredTools.filter(tool => tool.server === 'mixpanel');
+      console.log(`[buildToolsSchema] Filtered tools for telemetry-from-slack: excluded "mixpanel-mcp", ${mixpanelTools.length} tools from "mixpanel" server, ${filteredTools.length} total tools available`);
+    }
 
     const mcpTools = filteredTools.map(tool => ({
       name: tool.name,

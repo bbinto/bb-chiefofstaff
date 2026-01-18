@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { MCPClientManager } from './mcp-client.js';
 import { AgentRunner } from './agent-runner.js';
 import { ReportGenerator } from './report-generator.js';
 import { ConfigManager, validateEnvironment } from './config/config-manager.js';
 import { parseCliArguments, displayHelp, logParsedArguments, validateAgentRequirements } from './utils/cli-parser.js';
-import { AGENT_EXECUTION } from './utils/constants.js';
+import { AGENT_EXECUTION, PATHS } from './utils/constants.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Master Chief of Staff Agent
@@ -23,29 +29,41 @@ class ChiefOfStaffAgent {
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
     this.agentParams = agentParams; // { slackUserId: 'U...', folder: 'week1', etc. }
 
-    // Define agent execution order
-    this.agents = [
-      'prep-for-week',
-      'weekly-recap',
-      'business-health',
-      'product-engineering',
-      'telemetry-deepdive',
-      'team-pulse',
-      'pingboard-migration',
-      'jira-tracker',
-      'okr-progress',
-      'productivity-weekly-tracker',
-      'quarterly-review',
-      'quarterly-performance-review',
-      'performance-review-q3',
-      'thoughtleadership-updates',
-      'officevibe-strategy-roadmap',
-      'slack-user-analysis',
-      '1-1',
-      'weekly-executive-summary',
-      'good-vibes-recognition',
-      'tts'
-    ];
+    // Dynamically discover agents from the agents directory
+    this.agents = this.discoverAgents();
+  }
+
+  /**
+   * Discover agents dynamically from the agents directory
+   * This ensures any new agent file added to the agents/ directory is automatically available
+   */
+  discoverAgents() {
+    const agentsDir = path.join(__dirname, '..', PATHS.AGENTS_DIR);
+    
+    try {
+      if (!fs.existsSync(agentsDir)) {
+        console.warn(`[ChiefOfStaffAgent] Agents directory not found: ${agentsDir}`);
+        return [];
+      }
+
+      const files = fs.readdirSync(agentsDir);
+      const agentFiles = files
+        .filter(file => file.endsWith('.md'))
+        .map(file => file.replace('.md', ''))
+        .sort(); // Sort alphabetically for consistent ordering
+
+      console.log(`[ChiefOfStaffAgent] Discovered ${agentFiles.length} agent(s) from ${agentsDir}`);
+      
+      if (agentFiles.length > 0) {
+        console.log(`[ChiefOfStaffAgent] Available agents: ${agentFiles.join(', ')}`);
+      }
+
+      return agentFiles;
+    } catch (error) {
+      console.error(`[ChiefOfStaffAgent] Error discovering agents from ${agentsDir}:`, error.message);
+      // Return empty array if discovery fails - this will prevent execution but won't crash
+      return [];
+    }
   }
 
   /**
@@ -73,7 +91,7 @@ class ChiefOfStaffAgent {
 
     // Initialize MCP client
     console.log('Initializing MCP client...');
-    this.mcpClient = new MCPClientManager();
+    this.mcpClient = new MCPClientManager(this.config);
     await this.mcpClient.initialize();
 
     // Initialize agent runner
@@ -148,14 +166,16 @@ class ChiefOfStaffAgent {
 
     const results = [];
     const validAgents = agentNames.filter(name => this.agents.includes(name));
+    
+    // Log any invalid agents that were requested but don't exist
+    const invalidAgents = agentNames.filter(name => !this.agents.includes(name));
+    if (invalidAgents.length > 0) {
+      console.warn(`Warning: The following agent(s) were requested but not found: ${invalidAgents.join(', ')}`);
+      console.warn(`Available agents: ${this.agents.join(', ')}`);
+    }
 
     for (let i = 0; i < validAgents.length; i++) {
       const agentName = validAgents[i];
-      
-      if (!this.agents.includes(agentName)) {
-        console.warn(`Warning: Unknown agent "${agentName}", skipping...`);
-        continue;
-      }
 
       try {
         const result = await this.agentRunner.runAgent(agentName);

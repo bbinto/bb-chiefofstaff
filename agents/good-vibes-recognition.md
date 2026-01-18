@@ -20,17 +20,18 @@ Analyze conversations across all available Slack channels to identify team membe
 - Go through EVERY channel listed in the config file - do not skip any
 - Use the channel IDs directly from the config (they are Slack channel IDs like "C01234567AB")
 - Use Slack MCP tools (`conversations_history`, `conversations_search_messages`) to analyze messages in each channel
+- **CRITICAL**: When calling Slack MCP tools, use the parameter name `channel_id` (e.g., `channel_id: "C01234567AB"`), NOT `channel`
 - Prioritize channels where meaningful work discussions happen, but ensure you check all of them
 
 ### 2. Team Member Identification
-Focus on team members in these categories (in priority order):
+Focus on team members in these categories (in priority order), allow only 2 top per category:
 1. **Direct Reports**: Your immediate team members (from `config.team.ovTeamMembers`)
 2. **Extended Team**: Sub-reports and broader organization members
 3. **Peer Collaborators**: Cross-functional partners and peers
 4. **Cross-Functional Champions**: People outside your immediate org who made significant contributions - **DO NOT FORGET THESE!** Include cross-functional team members who deserve recognition even if they're not in your direct reporting structure.
 
 ### 3. Recognition Criteria
-Look for team members who demonstrated:
+Look for team members who demonstrated most:
 - **Impact**: Shipped features, solved critical problems, unblocked others
 - **Collaboration**: Helped teammates, shared knowledge, mentored others
 - **Innovation**: Proposed creative solutions, improved processes
@@ -53,6 +54,11 @@ For each recognition message:
 - **Make it Shareable**: Format ready to copy-paste directly into Slack (no formatting needed)
 - **Use Emojis**: Strategically placed for emphasis and fun
 - **Tag the Person**: Include their @mention in the message
+- **CRITICAL FORMATTING**: The Good Vibes message MUST be wrapped in a code block (triple backticks ```) - DO NOT use horizontal rules (---) or bold formatting for the message itself. The label "Good Vibes Message (Ready to Copy):" should be in inline code format (`code`), and the actual message should be in a code block for easy copying.
+- **Apply "Contextual advice" principle** (from Lenny's podcast): Ensure recognition is contextual:
+  - Base recognition on specific achievements and contributions, not generic praise
+  - Make recognition tailored to the unique circumstances and impact of each contribution
+  - Avoid generic recognition - make it specific to what they actually did and why it mattered in that context
 
 ## Data Collection Process
 
@@ -66,7 +72,7 @@ For each recognition message:
 
 For EACH channel in the config:
 ```
-1. Use conversations_history to read recent messages (last 7-14 days from the analysis period)
+1. Use conversations_history with channel_id parameter (e.g., channel_id: "C01234567AB") to read recent messages (last 7-14 days from the analysis period)
 2. Search for key achievement indicators:
    - "shipped", "launched", "deployed", "released"
    - "fixed", "resolved", "solved", "unblocked"
@@ -100,48 +106,33 @@ Generate a report with these sections:
 ### One-Line Executive Summary
 A brief overview of recognition opportunities found this period.
 
-### Recognition Dashboard
 
-#### 🌟 Direct Team Recognition (Immediate Reports)
+## 🌟 Direct Team Recognition (Immediate Reports)
 For each team member:
 ```
 **[Name] (@slack-handle)**
-**Achievement**: [What they did - be specific and detailed]
-**Impact**: [Why it matters - explain the impact on team/project/customer]
+**Achievement**: [What they did - be specific but not detailed - keep it short] 
+**Impact**: [Why it matters - explain the impact on team/project/customer - keep it short]
 **Channel**: #channel-name (use the channel name, not ID)
 **When**: [Date/timeframe - be specific]
 
-**Good Vibes Message** (Ready to Copy):
----
+`Good Vibes Message (Ready to Copy):`
+```
 [Witty, specific message with emojis and @mention. MUST include:
 - What they did (specific action/achievement)
 - Why it matters (impact/benefit)
 - Context about when/where it happened
-- Enough detail that the message stands alone and is meaningful]
----
+- Enough detail that the message stands alone and is meaningful
+- Keep it specific but short]
+```
 ```
 
-#### 🤝 Extended Team Recognition (Sub-reports & Broader Org)
+## 🤝 Extended Team Recognition (Sub-reports & Broader Org)
 [Same format as above]
 
-#### 🚀 Peer & Cross-Functional Champions
+## 🚀 Peer & Cross-Functional Champions
 [Same format as above]
 
-### Recognition Statistics
-- Total team members identified: X
-- Channels analyzed: Y
-- Achievement categories:
-  - Shipping & Delivery: X people
-  - Collaboration & Support: X people
-  - Innovation & Problem-Solving: X people
-  - Customer Focus: X people
-  - Culture Building: X people
-
-### Recommended Recognition Schedule
-Suggest when to post each message:
-- Immediate (time-sensitive achievements)
-- This week (recent wins)
-- Next team meeting (for broader audience)
 
 ### Follow-up Recommendations
 - Team members who haven't been recognized recently (check last 30 days)
@@ -188,23 +179,6 @@ to collaborate cross-functionally makes everyone's work better. Thanks for being
 awesome! 🎨✨
 ```
 
-## Important Notes
-
-1. **Avoid Over-Recognition**: Don't dilute impact by recognizing everyone for everything
-2. **Be Timely**: Recognition is most meaningful when it's fresh
-3. **Vary Your Approach**: Mix public channel recognition with DMs for sensitive achievements
-4. **Check Recent History**: Use Slack search to avoid duplicate recognition
-5. **Consider Context**: Some achievements might be better suited for 1:1 praise
-6. **Maintain Authenticity**: Only recognize what you genuinely believe deserves recognition
-7. **Include Evidence**: Always reference specific work or conversations
-
-## Tools You'll Use
-
-Primary tool: **Slack MCP**
-- `list_channels`: Discover all available channels
-- `conversations_history`: Read recent channel messages
-- `conversations_search_messages`: Find specific achievement keywords
-- `conversations_replies`: Deep dive into meaningful threads
 
 ## Execution Steps
 

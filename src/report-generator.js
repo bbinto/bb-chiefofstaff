@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { PATHS, PRICING, REPORT } from './utils/constants.js';
+import { PATHS, PRICING, REPORT, ENVIRONMENTAL_IMPACT } from './utils/constants.js';
 import { formatDateLocalISO, formatTimeLocal } from './utils/date-utils.js';
 
 /**
@@ -77,6 +77,51 @@ export class ReportGenerator {
   }
 
   /**
+   * Calculate carbon footprint from token usage
+   */
+  calculateCarbonFootprint(inputTokens, outputTokens) {
+    const inputCO2 = (inputTokens / 1000) * ENVIRONMENTAL_IMPACT.INPUT_TOKENS_CO2_PER_1K;
+    const outputCO2 = (outputTokens / 1000) * ENVIRONMENTAL_IMPACT.OUTPUT_TOKENS_CO2_PER_1K;
+    const totalCO2 = inputCO2 + outputCO2;
+    return {
+      inputCO2,
+      outputCO2,
+      totalCO2,
+      totalCO2Kg: totalCO2 / 1000, // Convert grams to kg
+    };
+  }
+
+  /**
+   * Get environmental impact icon based on CO2 emissions
+   */
+  getEnvironmentalImpactIcon(totalCO2Grams) {
+    if (totalCO2Grams < ENVIRONMENTAL_IMPACT.THRESHOLD_GREEN_MAX) {
+      return '🟢'; // Green: Low impact
+    } else if (totalCO2Grams < ENVIRONMENTAL_IMPACT.THRESHOLD_YELLOW_MAX) {
+      return '🟡'; // Yellow: Moderate impact
+    } else {
+      return '🟠'; // Orange: High impact
+    }
+  }
+
+  /**
+   * Format environmental impact with context and icon
+   */
+  formatEnvironmentalImpact(totalCO2Kg) {
+    const totalCO2Grams = totalCO2Kg * 1000; // Convert to grams for icon logic
+    const icon = this.getEnvironmentalImpactIcon(totalCO2Grams);
+    
+    let formattedValue;
+    if (totalCO2Kg < 0.001) {
+      formattedValue = `${totalCO2Grams.toFixed(2)} g CO₂e`;
+    } else {
+      formattedValue = `${totalCO2Kg.toFixed(4)} kg CO₂e`;
+    }
+    
+    return `${icon} ${formattedValue}`;
+  }
+
+  /**
    * Build section for an agent's output
    */
   buildAgentSection(result) {
@@ -109,9 +154,20 @@ export class ReportGenerator {
 
       metadata += `**Token Usage**: ${inputTokens.toLocaleString()} input, ${outputTokens.toLocaleString()} output\n`;
       metadata += `**Cost**: $${totalCost.toFixed(4)} ($${inputCost.toFixed(4)} input + $${outputCost.toFixed(4)} output)\n`;
+      
+      // Calculate and add environmental impact
+      const carbonFootprint = this.calculateCarbonFootprint(inputTokens, outputTokens);
+      metadata += `**Environmental Impact**: ${this.formatEnvironmentalImpact(carbonFootprint.totalCO2Kg)}`;
+      
+      // Add context for better understanding (for > 1g CO2e)
+      if (carbonFootprint.totalCO2Kg > 0.001) {
+        const treeDays = (carbonFootprint.totalCO2Kg * ENVIRONMENTAL_IMPACT.TREE_DAYS_PER_KG_CO2).toFixed(1);
+        metadata += ` (equivalent to ~${treeDays} days of a tree's CO₂ absorption)`;
+      }
+      metadata += `\n`;
     }
-    if (result.executionTimeSec) {
-      metadata += `**Execution Time**: ${result.executionTimeSec}s\n`;
+    if (result.executionTimeMin) {
+      metadata += `**Execution Time**: ${result.executionTimeMin} min\n`;
     }
     
     const metadataSection = metadata ? `${metadata}\n` : '';

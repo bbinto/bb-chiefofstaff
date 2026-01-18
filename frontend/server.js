@@ -71,6 +71,7 @@ app.get('/', (req, res) => {
     <!DOCTYPE html>
     <html>
       <head>
+        
         <title>Chief of Staff API Server</title>
         <style>
           body {
@@ -141,14 +142,24 @@ function extractCost(content) {
 
 /**
  * Extract execution time from report content
- * Looks for pattern: **Execution Time**: X.XXs
+ * Looks for pattern: **Execution Time**: X.XX min or X.XXs (for backward compatibility)
+ * Returns value in minutes
  */
 function extractExecutionTime(content) {
-  const execTimeRegex = /\*\*Execution Time\*\*:\s*(\d+\.?\d*)s/;
-  const match = content.match(execTimeRegex);
-  if (match && match[1]) {
-    return parseFloat(match[1]);
+  // Try minutes format first (new format)
+  const execTimeMinRegex = /\*\*Execution Time\*\*:\s*(\d+\.?\d*)\s*min/;
+  const minMatch = content.match(execTimeMinRegex);
+  if (minMatch && minMatch[1]) {
+    return parseFloat(minMatch[1]);
   }
+  
+  // Fall back to seconds format (old format) and convert to minutes
+  const execTimeSecRegex = /\*\*Execution Time\*\*:\s*(\d+\.?\d*)s/;
+  const secMatch = content.match(execTimeSecRegex);
+  if (secMatch && secMatch[1]) {
+    return parseFloat(secMatch[1]) / 60;
+  }
+  
   return null;
 }
 
@@ -621,6 +632,104 @@ app.get('/api/mcp-status', async (req, res) => {
     console.error('Error checking MCP status:', error);
     res.status(500).json({
       error: 'Failed to check MCP status',
+      details: error.message
+    });
+  }
+});
+
+// Refresh MCP connections
+app.post('/api/mcp-refresh', async (req, res) => {
+  try {
+    // Import MCPClientManager
+    const { MCPClientManager } = await import('../src/mcp-client.js');
+
+    // Create a temporary MCP client instance
+    const mcpClient = new MCPClientManager();
+
+    console.log('Refreshing MCP connections...');
+
+    // Close existing connections
+    await mcpClient.close().catch(() => {}); // Ignore errors if not initialized
+
+    // Reinitialize connections
+    await mcpClient.initialize();
+
+    // Get connection summary
+    const tools = mcpClient.getAvailableTools();
+    const connectedCount = mcpClient.clients.size;
+
+    // Clean up
+    await mcpClient.close();
+
+    res.json({
+      success: true,
+      message: 'MCP connections refreshed successfully',
+      connectedServers: connectedCount,
+      availableTools: tools.length,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error refreshing MCP connections:', error);
+    res.status(500).json({
+      error: 'Failed to refresh MCP connections',
+      details: error.message
+    });
+  }
+});
+
+// Clear Slack MCP cache
+app.post('/api/mcp-clear-cache', async (req, res) => {
+  try {
+    const os = await import('os');
+    const cacheDir = path.join(os.default.homedir(), 'Library/Caches/slack-mcp-server');
+    const channelCacheFile = path.join(cacheDir, 'channels_cache_v2.json');
+    const usersCacheFile = path.join(cacheDir, 'users_cache.json');
+
+    const clearedFiles = [];
+    const errors = [];
+
+    // Try to delete channel cache
+    if (fs.existsSync(channelCacheFile)) {
+      try {
+        fs.unlinkSync(channelCacheFile);
+        clearedFiles.push('channels_cache_v2.json');
+      } catch (error) {
+        errors.push(`Failed to delete channel cache: ${error.message}`);
+      }
+    }
+
+    // Try to delete users cache
+    if (fs.existsSync(usersCacheFile)) {
+      try {
+        fs.unlinkSync(usersCacheFile);
+        clearedFiles.push('users_cache.json');
+      } catch (error) {
+        errors.push(`Failed to delete users cache: ${error.message}`);
+      }
+    }
+
+    if (clearedFiles.length > 0) {
+      res.json({
+        success: true,
+        message: `Cleared ${clearedFiles.length} cache file(s)`,
+        clearedFiles,
+        errors: errors.length > 0 ? errors : undefined,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.json({
+        success: true,
+        message: 'No cache files found to clear',
+        clearedFiles: [],
+        timestamp: new Date().toISOString()
+      });
+    }
+
+  } catch (error) {
+    console.error('Error clearing Slack cache:', error);
+    res.status(500).json({
+      error: 'Failed to clear Slack cache',
       details: error.message
     });
   }
