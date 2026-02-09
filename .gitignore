@@ -24,6 +24,7 @@ mcp-server-list-unused.json
 # My personal agents
 agents/*
 !agents/good-vibes-recognition.md
+!agents/kf-officevibe-insights.md
 
 
 # Logs
