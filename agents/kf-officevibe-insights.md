@@ -23,7 +23,7 @@ You are the Korn Ferry Officevibe Insights Agent. Your job is to compile a compr
 ### 2. Query Mixpanel Insights Reports (specificNetwork)
 - **CRITICAL: Use the Mixpanel MCP tools with projectId from config.mixpanel.projectId**
 - Query ALL saved Insights reports from the `specificNetwork` report IDs in the config:
-  - Report IDs: 88099162, 88099152, 88099166, 88140647, 88140879, 88140881, 88142082, 88099157, 88099181, 88099150
+  - Report IDs: 88099162, 88099152, 88099166, 88140647, 88140879, 88140881, 88142082, 88099157, 88099181, 88099150, 88099164
 - For each report ID, use the `queryInsightsReport` Mixpanel MCP tool with:
   - `bookmarkId`: the report ID (as string)
   - `projectId`: from config.mixpanel.projectId

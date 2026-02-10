@@ -373,6 +373,7 @@ function ReportViewer({ report, onBack, password }) {
   const [notesSaving, setNotesSaving] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [utterance, setUtterance] = useState(null)
+  const [anthropicUsage, setAnthropicUsage] = useState(null)
 
   // Parse markdown content into sections
   const parseContentSections = (markdown) => {
@@ -446,9 +447,23 @@ function ReportViewer({ report, onBack, password }) {
     return sections
   }
 
+  const fetchAnthropicUsage = async () => {
+    try {
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/anthropic-usage`, { headers })
+      if (response.ok) {
+        const data = await response.json()
+        setAnthropicUsage(data)
+      }
+    } catch (err) {
+      console.error('Error fetching Anthropic usage:', err)
+    }
+  }
+
   useEffect(() => {
     fetchReportContent()
     loadNotes()
+    fetchAnthropicUsage()
     
     // Check if mermaid is available
     const checkMermaid = setInterval(() => {
@@ -740,15 +755,59 @@ function ReportViewer({ report, onBack, password }) {
       'business-health': 'from-emerald-500 to-teal-500',
       'product-engineering': 'from-[#00203F] to-teal-600',
       'okr-progress': 'from-teal-600 to-cyan-500',
+      'release-tracker': 'from-indigo-600 to-purple-600',
       'telemetry-from-slack': 'from-purple-500 to-teal-500',
       'telemetry-deepdive': 'from-purple-500 to-teal-500',
       'mixpanel-query': 'from-purple-500 to-teal-500',
+      'feature-telemetry-tracking': 'from-purple-500 to-teal-500',
     }
     return colors[agentName] || 'from-[#00203F] to-teal-600'
   }
 
   return (
     <div className="bg-white/90 backdrop-blur-sm rounded-xl shadow-xl border-2 border-teal-100">
+      {/* Anthropic balance & API limit bar */}
+      <div className="border-b border-teal-200 bg-gradient-to-r from-[#00203F]/5 to-teal-50 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-sm">
+        <div className="flex flex-wrap items-center gap-4">
+          <span className="font-semibold text-[#00203F]">Anthropic</span>
+          <span className="text-gray-600">
+            Balance:{' '}
+            <a
+              href={anthropicUsage?.linkToBilling || 'https://console.anthropic.com/settings/billing'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-teal-600 hover:text-teal-800 underline font-medium"
+            >
+              View in Console
+            </a>
+          </span>
+          <span className="text-gray-600">
+            API limit $:{' '}
+            <a
+              href={anthropicUsage?.linkToBilling || 'https://console.anthropic.com/settings/billing'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-teal-600 hover:text-teal-800 underline font-medium"
+            >
+              View in Console
+            </a>
+          </span>
+          {anthropicUsage?.periodSpend != null && (
+            <span className="text-gray-700 font-medium">
+              {anthropicUsage.periodLabel}: <span className="text-[#00203F] font-bold">${anthropicUsage.periodSpend.toFixed(2)}</span>
+            </span>
+          )}
+          {anthropicUsage?.periodSpendError && (
+            <span className="text-amber-700 text-xs">({anthropicUsage.periodSpendError})</span>
+          )}
+        </div>
+        {report.cost != null && report.cost !== undefined && (
+          <span className="text-gray-600 font-medium">
+            This report: <span className="text-teal-700 font-bold">${report.cost.toFixed(4)}</span>
+          </span>
+        )}
+      </div>
+
       {/* Header */}
       <div className="border-b-2 border-teal-100 bg-gradient-to-r from-teal-50 to-cyan-50 px-5 py-4">
         <div className="flex items-center justify-between">

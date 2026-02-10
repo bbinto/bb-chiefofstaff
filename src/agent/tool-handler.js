@@ -120,10 +120,11 @@ export class ToolHandler {
   async readFileFromManualSources(args) {
     const manualSourcesPath = path.resolve(process.cwd(), PATHS.MANUAL_SOURCES_DIR);
 
-    // If a folder parameter is provided for business-health agent, use it as base path
+    // If a folder parameter is provided (business-health, weekly-recap, etc.), use it as base path
     let basePath = manualSourcesPath;
-    if (this.agentParams.manualSourcesFolder) {
-      basePath = path.resolve(manualSourcesPath, this.agentParams.manualSourcesFolder);
+    const folderParam = this.agentParams.manualSourcesFolder || this.agentParams.folder;
+    if (folderParam) {
+      basePath = path.resolve(manualSourcesPath, folderParam);
     }
 
     const filePath = path.resolve(basePath, args.filename);
@@ -288,11 +289,12 @@ export class ToolHandler {
 
     // If a folder parameter is provided, list only that folder
     let searchPath = manualSourcesPath;
-    if (this.agentParams.manualSourcesFolder) {
-      searchPath = path.resolve(manualSourcesPath, this.agentParams.manualSourcesFolder);
+    const folderParam = this.agentParams.manualSourcesFolder || this.agentParams.folder;
+    if (folderParam) {
+      searchPath = path.resolve(manualSourcesPath, folderParam);
       if (!fs.existsSync(searchPath)) {
         return {
-          error: `Specified folder "${this.agentParams.manualSourcesFolder}" does not exist in manual_sources`,
+          error: `Specified folder "${folderParam}" does not exist in manual_sources`,
           path: searchPath,
           availableFolders: this.listAllDirectoriesRecursive(manualSourcesPath).map(d => d)
         };
@@ -319,9 +321,7 @@ export class ToolHandler {
     }));
 
     return {
-      folder: this.agentParams.manualSourcesFolder
-        ? `manual_sources/${this.agentParams.manualSourcesFolder}`
-        : 'manual_sources',
+      folder: folderParam ? `manual_sources/${folderParam}` : 'manual_sources',
       directories: dirDetails,
       files: fileDetails,
       totalFiles: fileDetails.length,

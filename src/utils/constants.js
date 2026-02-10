@@ -89,6 +89,24 @@ export const MCP_DEFAULTS = {
   RETRY_DELAY: 2000,          // 2 seconds initial delay
 };
 
+// Mixpanel Rate Limiting
+// The raw export API has a rate limit of:
+// - 60 queries per hour
+// - 3 queries per second
+// - Maximum 100 concurrent queries
+// - 429 error if exceeded
+export const MIXPANEL_RATE_LIMITS = {
+  QUERIES_PER_HOUR: 60,
+  QUERIES_PER_SECOND: 3,
+  MAX_CONCURRENT_QUERIES: 100,
+  HOUR_WINDOW_MS: 60 * 60 * 1000,  // 1 hour in milliseconds
+  SECOND_WINDOW_MS: 1000,          // 1 second in milliseconds
+  MIN_DELAY_BETWEEN_QUERIES: 334,  // ~3 queries per second = 334ms minimum delay
+  RETRY_MAX_ATTEMPTS: 5,
+  RETRY_INITIAL_BACKOFF: 5000,     // 5 seconds initial backoff on 429
+  RETRY_MAX_BACKOFF: 60000,        // 60 seconds max backoff
+};
+
 // Date Configuration
 export const DATE_CONFIG = {
   DEFAULT_DAYS_BACK: 7,

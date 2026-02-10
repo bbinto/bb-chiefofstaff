@@ -3,7 +3,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { MCP_DEFAULTS } from './utils/constants.js';
+import { MCP_DEFAULTS, MIXPANEL_RATE_LIMITS } from './utils/constants.js';
+import { MixpanelRateLimiter } from './agent/mixpanel-rate-limiter.js';
 
 /**
  * MCP Client Manager
@@ -18,6 +19,8 @@ export class MCPClientManager {
     this.connectionTimeout = parseInt(process.env.MCP_CONNECTION_TIMEOUT || MCP_DEFAULTS.CONNECTION_TIMEOUT, 10);
     this.maxRetries = parseInt(process.env.MCP_MAX_RETRIES || MCP_DEFAULTS.MAX_RETRIES, 10);
     this.retryDelay = parseInt(process.env.MCP_RETRY_DELAY || MCP_DEFAULTS.RETRY_DELAY, 10);
+    // Mixpanel rate limiter for enforcing Mixpanel API rate limits
+    this.mixpanelRateLimiter = new MixpanelRateLimiter();
   }
 
   /**
@@ -235,18 +238,78 @@ export class MCPClientManager {
       // If listing tools fails, remove the client but don't throw
       // (connection succeeded but tool listing failed)
       this.clients.delete(serverName);
+      
+      // Provide more detailed error information for debugging
+      const errorDetails = {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        code: error.code
+      };
+      
+      // Check if this is a remote server error (mcp-remote package)
+      const isRemoteError = (error.message && (
+        error.message.includes('mcp-remote') || 
+        error.message.includes('remote server') ||
+        error.message.includes('Error from remote server')
+      )) || (error.stack && error.stack.includes('mcp-remote'));
+      
+      if (isRemoteError) {
+        console.error(`\n⚠️  Remote MCP server error for ${serverName}:`);
+        console.error(`   This appears to be a remote server connection issue.`);
+        console.error(`   Error: ${error.message}`);
+        console.error(`   Check your remote server configuration and network connectivity.`);
+        console.error(`   The remote server may be returning an invalid response format.`);
+      }
+      
       throw new Error(`MCP error -32001: Request timed out - Failed to list tools: ${error.message}`);
     }
 
-    toolsList.tools.forEach(tool => {
-      this.tools.set(tool.name, { serverName, client, schema: tool });
+    // Validate toolsList response structure
+    if (!toolsList) {
+      this.clients.delete(serverName);
+      throw new Error(`MCP error: Received undefined response from ${serverName} when listing tools`);
+    }
+
+    // Handle different response formats
+    const tools = toolsList.tools || toolsList || [];
+    if (!Array.isArray(tools)) {
+      this.clients.delete(serverName);
+      throw new Error(`MCP error: Invalid tools response format from ${serverName}. Expected array, got ${typeof tools}`);
+    }
+
+    // Register tools with error handling for individual tools
+    let registeredCount = 0;
+    const errors = [];
+    tools.forEach(tool => {
+      try {
+        if (!tool || !tool.name) {
+          console.warn(`  ⚠️  Skipping invalid tool from ${serverName}: missing name property`);
+          return;
+        }
+        this.tools.set(tool.name, { serverName, client, schema: tool });
+        registeredCount++;
+      } catch (error) {
+        errors.push(`Tool registration error: ${error.message}`);
+        console.warn(`  ⚠️  Failed to register tool from ${serverName}: ${error.message}`);
+      }
     });
 
-    console.log(`  ✓ Connected to ${serverName}: ${toolsList.tools.length} tools available`);
+    if (registeredCount === 0 && tools.length > 0) {
+      // All tools failed to register
+      this.clients.delete(serverName);
+      throw new Error(`MCP error: Failed to register any tools from ${serverName}. Errors: ${errors.join('; ')}`);
+    }
+
+    if (errors.length > 0) {
+      console.warn(`  ⚠️  ${serverName}: Registered ${registeredCount}/${tools.length} tools (${errors.length} failed)`);
+    } else {
+      console.log(`  ✓ Connected to ${serverName}: ${registeredCount} tools available`);
+    }
   }
 
   /**
-   * Call an MCP tool
+   * Call an MCP tool with rate limiting for Mixpanel tools
    */
   async callTool(toolName, args = {}) {
     // Debug: Log tool name details
@@ -264,6 +327,9 @@ export class MCPClientManager {
       throw new Error(`Tool ${toolName} not found. Available tools: ${Array.from(this.tools.keys()).join(', ')}`);
     }
 
+    // Check if this is a Mixpanel tool
+    const isMixpanel = this.isMixpanelTool(toolName, toolInfo.serverName);
+
     // Log JQL queries for Jira tools
     if (this.isJiraTool(toolName, toolInfo.serverName)) {
       const jql = args.jql || args.query || args.jqlQuery;
@@ -275,15 +341,63 @@ export class MCPClientManager {
       }
     }
 
-    const { client } = toolInfo;
-    const result = await client.callTool({ name: toolName, arguments: args });
-
-    // Log results for Jira tools
-    if (this.isJiraTool(toolName, toolInfo.serverName)) {
-      this.logJiraResults(toolName, result);
+    // Log Mixpanel tool calls
+    if (isMixpanel) {
+      console.log(`\n[Mixpanel Tool] ${toolName} - Applying rate limiting...`);
     }
 
-    return result;
+    const { client } = toolInfo;
+
+    // For Mixpanel tools, use rate limiting with retry logic for 429 errors
+    if (isMixpanel) {
+      let lastError = null;
+      
+      for (let attempt = 0; attempt < MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS; attempt++) {
+        try {
+          // Use rate limiter to wrap the tool call
+          const result = await this.mixpanelRateLimiter.withRateLimit(
+            () => client.callTool({ name: toolName, arguments: args }),
+            toolName
+          );
+
+          // Log results for Mixpanel tools
+          console.log(`[Mixpanel Tool] ${toolName} completed successfully`);
+
+          return result;
+        } catch (error) {
+          lastError = error;
+          
+          // Check if it's a 429 error
+          if (this.mixpanelRateLimiter.is429Error(error)) {
+            if (attempt < MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS - 1) {
+              // Handle 429 with exponential backoff
+              await this.mixpanelRateLimiter.handle429Error(attempt);
+              continue; // Retry
+            } else {
+              // Out of retries
+              console.error(`[Mixpanel Tool] ${toolName} failed after ${MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS} attempts due to rate limiting`);
+              throw new Error(`Mixpanel rate limit exceeded after ${MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS} retries: ${error.message}`);
+            }
+          } else {
+            // Not a 429 error, re-throw immediately
+            throw error;
+          }
+        }
+      }
+      
+      // Should not reach here, but handle it just in case
+      throw lastError || new Error(`Failed to call ${toolName} after ${MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS} attempts`);
+    } else {
+      // For non-Mixpanel tools, call directly without rate limiting
+      const result = await client.callTool({ name: toolName, arguments: args });
+
+      // Log results for Jira tools
+      if (this.isJiraTool(toolName, toolInfo.serverName)) {
+        this.logJiraResults(toolName, result);
+      }
+
+      return result;
+    }
   }
 
   /**
@@ -300,6 +414,27 @@ export class MCPClientManager {
     const serverLower = (serverName || '').toLowerCase();
     
     return jiraIndicators.some(indicator => 
+      nameLower.includes(indicator) || serverLower.includes(indicator)
+    );
+  }
+
+  /**
+   * Check if a tool is a Mixpanel-related tool
+   * @param {string} toolName - Name of the tool
+   * @param {string} serverName - Name of the server
+   * @returns {boolean} True if this is a Mixpanel tool
+   */
+  isMixpanelTool(toolName, serverName) {
+    const mixpanelIndicators = [
+      'mixpanel',
+      'query_mixpanel',
+      'mixpanel_query'
+    ];
+    
+    const nameLower = toolName.toLowerCase();
+    const serverLower = (serverName || '').toLowerCase();
+    
+    return mixpanelIndicators.some(indicator => 
       nameLower.includes(indicator) || serverLower.includes(indicator)
     );
   }

@@ -9,10 +9,12 @@ function AgentRunner({ password, onClose }) {
     { name: 'daily-brief', displayName: 'Daily Brief', description: 'Super concise daily brief with top 2 items from news, Slack, and Jira from yesterday', lastRun: null },
     { name: 'weekly-recap', displayName: 'Weekly Recap', description: 'Weekly team catch-up and recap', lastRun: null },
     { name: 'business-health', displayName: 'Business Health', description: 'Officevibe business and product health', requiresParam: 'manualSourcesFolder', lastRun: null },
+    { name: 'business-pulse', displayName: 'Business Pulse Brief', description: 'Officevibe business pulse', lastRun: null },
     { name: 'product-engineering', displayName: 'Product Engineering', description: 'Product development and engineering updates', lastRun: null },
     { name: 'telemetry-deepdive', displayName: 'Telemetry Deep Dive', description: 'Deep dive into telemetry data', requiresParam: 'folder', lastRun: null },
     { name: 'telemetry-from-slack', displayName: 'Telemetry from Slack', description: 'Analyze Mixpanel updates from Slack telemetry channels (last 24 hours)', lastRun: null },
     { name: 'mixpanel-query', displayName: 'Mixpanel Query', description: 'Query Mixpanel analytics for retention, usage, and feature metrics', lastRun: null },
+    { name: 'feature-telemetry-tracking', displayName: 'Feature Telemetry Tracking', description: 'Analyze one feature\'s Mixpanel telemetry vs overall MAU and adoption', requiresParam: 'feature', lastRun: null },
     { name: 'team-pulse', displayName: 'Team Pulse', description: 'Team engagement and pulse survey analysis', lastRun: null },
     { name: 'pingboard-migration', displayName: 'Pingboard Migration', description: 'Pingboard migration status', lastRun: null },
     { name: 'jira-tracker', displayName: 'Jira Tracker', description: 'Track Jira issues and progress', lastRun: null },
@@ -43,8 +45,10 @@ function AgentRunner({ password, onClose }) {
     manualSourcesFolder: '',
     folder: '',
     email: '',
-    week: ''
+    week: '',
+    feature: ''
   })
+  const [releases, setReleases] = useState({}) // config.releases for feature dropdown
   const [isRunning, setIsRunning] = useState(false)
   const [executionStatus, setExecutionStatus] = useState(null)
   const [executionLogs, setExecutionLogs] = useState([])
@@ -58,6 +62,22 @@ function AgentRunner({ password, onClose }) {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [executionLogs])
+
+  // Fetch config.releases when feature-telemetry-tracking is available (for feature dropdown)
+  useEffect(() => {
+    const fetchReleases = async () => {
+      try {
+        const headers = password ? { 'x-app-password': password } : {}
+        const response = await fetch(`${API_URL}/api/config`, { headers })
+        if (!response.ok) return
+        const config = await response.json()
+        setReleases(config.releases || {})
+      } catch (err) {
+        console.error('Error fetching config for releases:', err)
+      }
+    }
+    fetchReleases()
+  }, [password])
 
   // Fetch last run timestamps for each agent
   useEffect(() => {
@@ -370,26 +390,43 @@ function AgentRunner({ password, onClose }) {
                       {agent.requiresParam === 'folder' && 'Folder'}
                       {agent.requiresParam === 'email' && 'Email'}
                       {agent.requiresParam === 'week' && 'Week'}
+                      {agent.requiresParam === 'feature' && 'Feature (release)'}
                       <span className="text-orange-600 ml-1">*</span>
                     </label>
                     <div className="text-xs text-gray-600 mb-2">
                       Required for: {agent.displayName}
                     </div>
-                    <input
-                      type="text"
-                      value={parameters[agent.requiresParam]}
-                      onChange={(e) => handleParameterChange(agent.requiresParam, e.target.value)}
-                      disabled={isRunning}
-                      placeholder={
-                        agent.requiresParam === 'slackUserId' ? 'e.g., U01234567AB' :
-                        agent.requiresParam === 'manualSourcesFolder' ? 'e.g., Week 1' :
-                        agent.requiresParam === 'folder' ? 'e.g., week1' :
-                        agent.requiresParam === 'email' ? 'e.g., user@example.com' :
-                        agent.requiresParam === 'week' ? 'e.g., week 1 or week 1 2025' :
-                        ''
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                    />
+                    {agent.requiresParam === 'feature' ? (
+                      <select
+                        value={parameters.feature}
+                        onChange={(e) => handleParameterChange('feature', e.target.value)}
+                        disabled={isRunning}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white"
+                      >
+                        <option value="">Select a feature (release)...</option>
+                        {Object.entries(releases).map(([key, r]) => (
+                          <option key={key} value={key}>
+                            {r.name || key} {r.telemetry ? '' : '(no telemetry)'}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={parameters[agent.requiresParam]}
+                        onChange={(e) => handleParameterChange(agent.requiresParam, e.target.value)}
+                        disabled={isRunning}
+                        placeholder={
+                          agent.requiresParam === 'slackUserId' ? 'e.g., U01234567AB' :
+                          agent.requiresParam === 'manualSourcesFolder' ? 'e.g., Week 1' :
+                          agent.requiresParam === 'folder' ? 'e.g., week1' :
+                          agent.requiresParam === 'email' ? 'e.g., user@example.com' :
+                          agent.requiresParam === 'week' ? 'e.g., week 1 or week 1 2025' :
+                          ''
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                      />
+                    )}
                   </div>
                 ))}
               </div>

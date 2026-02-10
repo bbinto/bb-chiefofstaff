@@ -129,7 +129,8 @@ export class AgentRunner {
           }
 
           // If we can't truncate or out of retries, throw with helpful message
-          throw new Error(`Prompt too long (exceeds ${TOKEN_LIMITS.MAX_TOTAL_TOKENS / 1000}k token limit). Try running the agent with fewer data sources or split the work into smaller tasks.`);
+          const currentTokens = this.messageTruncator.estimateTokenCount(params.messages || [], params.tools || []);
+          throw new Error(`Prompt too long (exceeds ${TOKEN_LIMITS.MAX_TOTAL_TOKENS / 1000}k token limit). Current estimate: ${Math.round(currentTokens / 1000)}k tokens. The system attempted aggressive truncation but the conversation history is still too large. Try running the agent with fewer data sources, reduce the date range, or split the work into smaller tasks.`);
         }
 
         if (isRateLimitError) {
@@ -158,8 +159,8 @@ export class AgentRunner {
     const startTime = Date.now(); // Track execution start time
     const instructions = this.loadAgentInstructions(agentName);
 
-    // Prepare context with configuration (will be cached)
-    this.contextMessage = this.buildContextMessage();
+    // Prepare context with configuration (will be cached). Pass agentName for agent-specific slim context.
+    this.contextMessage = this.buildContextMessage(agentName);
 
     // Build parameter message for agents that need it
     let parameterMessage = '';
@@ -186,6 +187,13 @@ export class AgentRunner {
         console.log('[AgentRunner] Parameter message created:', parameterMessage);
       } else {
         console.log('[AgentRunner] ❌ No folder parameter found in this.agentParams');
+      }
+    }
+
+    if (agentName === 'weekly-recap') {
+      const businessFolder = this.agentParams.manualSourcesFolder || this.agentParams.folder;
+      if (businessFolder) {
+        parameterMessage = `\n\n**IMPORTANT: Business Metrics Folder**\nUse the "${businessFolder}" subfolder within manual_sources for the Business Metrics section. Use list_manual_sources_files to discover files, then read_file_from_manual_sources to read closed lost deals, won deals, or other business data.${this.agentParams.manualSourcesFolder ? ` (The manual_sources tools are scoped to "${businessFolder}".)` : ''}`;
       }
     }
 
@@ -239,6 +247,26 @@ export class AgentRunner {
       }
     }
 
+    if (agentName === 'mixpanel-query') {
+      console.log('[AgentRunner] Processing mixpanel-query agent. this.agentParams:', this.agentParams);
+      console.log('[AgentRunner] this.agentParams.insightIds value (raw):', this.agentParams.insightIds);
+      console.log('[AgentRunner] this.agentParams.insightIds type:', typeof this.agentParams.insightIds);
+      if (this.agentParams.insightIds) {
+        console.log('[AgentRunner] ✅ Insight IDs parameter found! Overriding default config values:', this.agentParams.insightIds);
+        // Parse comma-separated list - handle both comma and comma+space separators
+        const insightIdsArray = String(this.agentParams.insightIds)
+          .split(',')
+          .map(id => id.trim())
+          .filter(id => id.length > 0);
+        console.log('[AgentRunner] Parsed insightIds array:', insightIdsArray);
+        console.log('[AgentRunner] Number of insight IDs:', insightIdsArray.length);
+        parameterMessage = `\n\n**IMPORTANT: Insight IDs Parameter**\nThe insight IDs parameter has been set to: "${this.agentParams.insightIds}"\nYou MUST query ONLY these specific insight reports (bookmark IDs): ${insightIdsArray.join(', ')}\nDO NOT use the default config values - use only the insight IDs provided in this parameter.\nFor each insight report, include a link to the Mixpanel chart: https://mixpanel.com/project/{projectId}/view/{workspaceId}/app/insights/?discover=1#report/{bookmarkId}`;
+        console.log('[AgentRunner] Parameter message created for insight IDs');
+      } else {
+        console.log('[AgentRunner] No insight IDs parameter found - will use default config values from config["mixpanel-insights"]');
+      }
+    }
+
     if (agentName === 'performance-review-q3') {
       console.log('[AgentRunner] Processing performance-review-q3 agent. this.agentParams:', this.agentParams);
       console.log('[AgentRunner] this.agentParams.email value:', this.agentParams.email);
@@ -249,6 +277,36 @@ export class AgentRunner {
       } else {
         console.log('[AgentRunner] ❌ No email parameter found in this.agentParams');
         parameterMessage = `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to review before proceeding. The email should match someone in the team configuration (config.team.ovTeamMembers or config.team.OVEntireTeam).`;
+      }
+    }
+
+    if (agentName === 'feature-telemetry-tracking') {
+      const rawFeature = this.agentParams.feature;
+      const featureKeyTrimmed = typeof rawFeature === 'string' ? rawFeature.trim() : (rawFeature ? String(rawFeature).trim() : '');
+      const releases = this.config.releases || {};
+      let release = featureKeyTrimmed ? releases[featureKeyTrimmed] : null;
+      let featureKey = featureKeyTrimmed;
+      // If no release by key, try matching by display name (e.g. "Help me reply" -> help_me_reply)
+      if (!release && featureKeyTrimmed) {
+        const entry = Object.entries(releases).find(
+          ([k, r]) => (r.name || k).toLowerCase() === featureKeyTrimmed.toLowerCase()
+        );
+        if (entry) {
+          featureKey = entry[0];
+          release = entry[1];
+        }
+      }
+      console.log('[AgentRunner] feature-telemetry-tracking param:', rawFeature, 'trimmed:', featureKeyTrimmed, 'resolved key:', featureKey, 'release found:', !!release);
+      if (featureKey && release) {
+        const featureName = release.name || featureKey;
+        const telemetry = release.telemetry;
+        const telemetryStr = Array.isArray(telemetry)
+          ? telemetry.join(', ')
+          : (typeof telemetry === 'string' ? telemetry : 'None');
+        parameterMessage = `\n\n**IMPORTANT: Feature Parameter**\nThe selected feature is: "${featureName}" (key: ${featureKey}).\nUse ONLY this feature's telemetry for the report.\n**Telemetry (report IDs or URL) for this feature**: ${telemetryStr || 'None (no report IDs configured)'}\nIf telemetry is a comma-separated list of numeric IDs, query each as a Mixpanel insight bookmark. If it is a single URL, include that link in the report and use it as the feature report reference.\nCompare feature usage to overall MAU (from config["mixpanel-insights"].mau) and compute feature adoption % where possible.`;
+      } else {
+        const availableKeys = Object.keys(releases).slice(0, 10).join(', ');
+        parameterMessage = `\n\n**IMPORTANT: Feature Parameter Required**\nNo valid feature was provided (received: "${featureKeyTrimmed || 'missing'}"). The feature must be one of the release keys from config.releases. Available keys include: ${availableKeys}${Object.keys(releases).length > 10 ? '...' : ''}. Please ask the user to select a feature from the releases list.`;
       }
     }
 
@@ -266,13 +324,177 @@ export class AgentRunner {
     console.log(`\n🔧 Tools available to ${agentName}:`, tools.map(t => t.name).slice(0, 10).join(', '), tools.length > 10 ? `... and ${tools.length - 10} more` : '');
 
     // Build system message with caching for context
+    // Check if initial prompt is too large and truncate both system message and user message if needed
+    let systemText = this.contextMessage;
+    let userContent = messages[0].content;
+    
+    const estimatedSystemTokens = Math.ceil(systemText.length / TOKEN_LIMITS.CHARS_PER_TOKEN);
+    const estimatedUserTokens = Math.ceil(userContent.length / TOKEN_LIMITS.CHARS_PER_TOKEN);
+    const estimatedToolTokens = tools.length * TOKEN_LIMITS.TOOL_OVERHEAD_PER_TOOL;
+    const estimatedTotalTokens = estimatedSystemTokens + estimatedUserTokens + estimatedToolTokens;
+    
+    console.log(`📊 Token estimation: System=${Math.round(estimatedSystemTokens/1000)}k, User=${Math.round(estimatedUserTokens/1000)}k, Tools=${Math.round(estimatedToolTokens/1000)}k, Total=${Math.round(estimatedTotalTokens/1000)}k (limit=${TOKEN_LIMITS.MAX_PROMPT_TOKENS/1000}k)`);
+    
+    // If estimated tokens exceed limit, truncate both system and user messages
+    if (estimatedTotalTokens > TOKEN_LIMITS.MAX_PROMPT_TOKENS) {
+      const buffer = 15000; // Leave 15k buffer for safety
+      const availableTokens = TOKEN_LIMITS.MAX_PROMPT_TOKENS - estimatedToolTokens - buffer;
+      
+      // Allocate 40% to system, 60% to user (user message is more critical for agent execution)
+      const maxSystemTokens = Math.floor(availableTokens * 0.4);
+      const maxUserTokens = Math.floor(availableTokens * 0.6);
+      const maxSystemChars = maxSystemTokens * TOKEN_LIMITS.CHARS_PER_TOKEN;
+      const maxUserChars = maxUserTokens * TOKEN_LIMITS.CHARS_PER_TOKEN;
+      
+      // Truncate system message if needed
+      if (systemText.length > maxSystemChars) {
+        console.warn(`⚠️  System message too large (${Math.round(estimatedSystemTokens/1000)}k tokens). Truncating to ${Math.round(maxSystemTokens/1000)}k tokens...`);
+        // Keep the most important parts: Dates section and agent-specific config
+        const lines = systemText.split('\n');
+        const importantSections = ['## Dates', '## Dates (CRITICAL)', '## Team', '## Slack', '## Jira', '## Confluence', '## Mixpanel'];
+        const keptLines = [];
+        let inImportantSection = false;
+        
+        // Always keep the first section (title)
+        keptLines.push(lines[0]);
+        
+        // Keep important sections
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          const isSectionHeader = importantSections.some(section => line.startsWith(section));
+          
+          if (isSectionHeader) {
+            inImportantSection = true;
+            keptLines.push(line);
+          } else if (inImportantSection && line.trim() && !line.startsWith('##')) {
+            keptLines.push(line);
+          } else if (line.startsWith('##')) {
+            inImportantSection = false;
+            // Only keep section if we have space
+            if (keptLines.join('\n').length < maxSystemChars * 0.8) {
+              keptLines.push(line);
+            }
+          } else if (keptLines.join('\n').length < maxSystemChars * 0.8) {
+            keptLines.push(line);
+          }
+        }
+        
+        systemText = keptLines.join('\n');
+        // If still too long, truncate by character count
+        if (systemText.length > maxSystemChars) {
+          systemText = systemText.substring(0, maxSystemChars) + '\n\n[System message truncated due to size limits. Some configuration details may be missing.]';
+        }
+        
+        console.log(`   Truncated system message: ${Math.round(systemText.length / TOKEN_LIMITS.CHARS_PER_TOKEN / 1000)}k tokens`);
+      }
+      
+      // Truncate user message (agent instructions) if needed
+      if (userContent.length > maxUserChars) {
+        console.warn(`⚠️  Agent instructions too large (${Math.round(estimatedUserTokens/1000)}k tokens). Truncating to ${Math.round(maxUserTokens/1000)}k tokens...`);
+        
+        // Keep the most important sections: Purpose, Data Sources, Instructions (key parts), Output Format
+        const lines = userContent.split('\n');
+        const importantSections = ['## Purpose', '## Data Sources', '## Instructions', '## Output Format', '## Success Criteria'];
+        const keptLines = [];
+        let inImportantSection = false;
+        let currentSection = '';
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          const isSectionHeader = importantSections.some(section => line.startsWith(section));
+          
+          if (isSectionHeader) {
+            currentSection = line;
+            inImportantSection = true;
+            keptLines.push(line);
+          } else if (inImportantSection) {
+            // For Instructions section, keep only key parts (first 200 lines or until we hit limit)
+            if (currentSection.includes('## Instructions')) {
+              if (keptLines.join('\n').length < maxUserChars * 0.7) {
+                keptLines.push(line);
+              } else {
+                // Add truncation notice
+                keptLines.push('\n[Instructions truncated - key sections preserved. Agent should use tools to gather data as specified in Data Sources section.]');
+                break;
+              }
+            } else {
+              // For other sections, keep all content
+              if (keptLines.join('\n').length < maxUserChars * 0.9) {
+                keptLines.push(line);
+              } else {
+                break;
+              }
+            }
+          } else if (line.startsWith('#')) {
+            // New section not in important list - skip unless we have space
+            if (keptLines.join('\n').length < maxUserChars * 0.8) {
+              keptLines.push(line);
+              inImportantSection = true;
+              currentSection = line;
+            }
+          }
+        }
+        
+        userContent = keptLines.join('\n');
+        // If still too long, truncate by character count
+        if (userContent.length > maxUserChars) {
+          userContent = userContent.substring(0, maxUserChars) + '\n\n[Agent instructions truncated due to size limits. Please refer to the Data Sources and Output Format sections for guidance.]';
+        }
+        
+        console.log(`   Truncated user message: ${Math.round(userContent.length / TOKEN_LIMITS.CHARS_PER_TOKEN / 1000)}k tokens`);
+      }
+      
+      // Update the messages array with truncated content
+      messages[0].content = userContent;
+    }
+
     const systemMessage = [
       {
         type: "text",
-        text: this.contextMessage,
+        text: systemText,
         cache_control: { type: "ephemeral" }
       }
     ];
+
+    // Final validation - check if we're still over limit after truncation
+    const finalSystemTokens = Math.ceil(systemText.length / TOKEN_LIMITS.CHARS_PER_TOKEN);
+    const finalUserTokens = Math.ceil(messages[0].content.length / TOKEN_LIMITS.CHARS_PER_TOKEN);
+    const finalTotalTokens = finalSystemTokens + finalUserTokens + estimatedToolTokens;
+    
+    if (finalTotalTokens > TOKEN_LIMITS.MAX_PROMPT_TOKENS) {
+      console.error(`❌ Still over token limit after truncation: ${Math.round(finalTotalTokens/1000)}k tokens (limit: ${TOKEN_LIMITS.MAX_PROMPT_TOKENS/1000}k)`);
+      console.error(`   System: ${Math.round(finalSystemTokens/1000)}k, User: ${Math.round(finalUserTokens/1000)}k, Tools: ${Math.round(estimatedToolTokens/1000)}k`);
+      
+      // More aggressive truncation - cut user message more
+      const maxAllowed = TOKEN_LIMITS.MAX_PROMPT_TOKENS - estimatedToolTokens - 20000; // 20k buffer
+      const maxUserChars = Math.floor(maxAllowed * 0.6) * TOKEN_LIMITS.CHARS_PER_TOKEN;
+      
+      if (messages[0].content.length > maxUserChars) {
+        console.warn(`⚠️  Applying aggressive truncation to user message...`);
+        // Keep only Purpose, Data Sources, and Output Format sections
+        const lines = messages[0].content.split('\n');
+        const essentialSections = ['## Purpose', '## Data Sources', '## Output Format'];
+        const keptLines = [];
+        let inEssentialSection = false;
+        
+        for (const line of lines) {
+          const isEssential = essentialSections.some(section => line.startsWith(section));
+          if (isEssential) {
+            inEssentialSection = true;
+            keptLines.push(line);
+          } else if (inEssentialSection && !line.startsWith('##')) {
+            if (keptLines.join('\n').length < maxUserChars * 0.9) {
+              keptLines.push(line);
+            }
+          } else if (line.startsWith('##')) {
+            inEssentialSection = false;
+          }
+        }
+        
+        messages[0].content = keptLines.join('\n') + '\n\n[Instructions heavily truncated. Use Data Sources section to identify required tools and Output Format for report structure.]';
+        console.log(`   Aggressively truncated user message: ${Math.round(messages[0].content.length / TOKEN_LIMITS.CHARS_PER_TOKEN / 1000)}k tokens`);
+      }
+    }
 
     try {
       let response = await this.makeApiCall({
@@ -315,31 +537,42 @@ export class AgentRunner {
             const resultString = JSON.stringify(toolResult);
             const resultLength = resultString.length;
 
-            // If result is larger than 50k characters (~12.5k tokens), summarize it
-            if (resultLength > 50000) {
-              console.log(`⚠️  Large tool result from ${toolUse.name} (${Math.round(resultLength/1000)}k chars), summarizing...`);
+            // If result is larger than 20k characters (~5k tokens), summarize it
+            // Lowered from 50k to catch more cases and prevent token limit issues
+            if (resultLength > 20000) {
+              console.log(`⚠️  Large tool result from ${toolUse.name} (${Math.round(resultLength/1000)}k chars, ~${Math.round(resultLength/TOKEN_LIMITS.CHARS_PER_TOKEN/1000)}k tokens), summarizing...`);
 
               // Try to intelligently truncate based on result type
               if (Array.isArray(toolResult)) {
+                // For arrays, keep fewer items (30 instead of 50) to save tokens
+                const keepItems = Math.min(30, toolResult.length);
                 toolResult = {
-                  _summary: `Array truncated: showing first 50 of ${toolResult.length} items`,
+                  _summary: `Array truncated: showing first ${keepItems} of ${toolResult.length} items. Use this sample to understand the data structure and patterns.`,
                   _total_items: toolResult.length,
-                  items: toolResult.slice(0, 50)
+                  items: toolResult.slice(0, keepItems)
                 };
               } else if (typeof toolResult === 'object' && toolResult !== null) {
-                // Keep structure but truncate large string values
+                // Keep structure but truncate large string values more aggressively
                 const summarized = {};
                 for (const [key, value] of Object.entries(toolResult)) {
-                  if (typeof value === 'string' && value.length > 5000) {
-                    summarized[key] = value.substring(0, 5000) + `... [truncated ${Math.round((value.length - 5000)/1000)}k more chars]`;
+                  if (typeof value === 'string' && value.length > 3000) {
+                    // Truncate strings more aggressively (3k instead of 5k)
+                    summarized[key] = value.substring(0, 3000) + `... [truncated ${Math.round((value.length - 3000)/1000)}k more chars]`;
+                  } else if (Array.isArray(value) && value.length > 20) {
+                    // Truncate large arrays within objects
+                    summarized[key] = value.slice(0, 20);
+                    summarized[`${key}_truncated`] = `Showing first 20 of ${value.length} items`;
                   } else {
                     summarized[key] = value;
                   }
                 }
                 toolResult = {
-                  _summary: 'Large object values truncated',
+                  _summary: 'Large object values truncated to reduce token usage',
                   ...summarized
                 };
+              } else if (typeof toolResult === 'string' && toolResult.length > 20000) {
+                // For very large strings, truncate more aggressively
+                toolResult = toolResult.substring(0, 15000) + `\n\n[Content truncated: ${Math.round((toolResult.length - 15000)/1000)}k more characters removed to stay within token limits]`;
               }
             }
 
@@ -350,6 +583,52 @@ export class AgentRunner {
             };
           })
         );
+
+        // Check token count BEFORE adding tool results to prevent exceeding limit
+        // Estimate what the token count will be after adding these results
+        const testMessages = [
+          ...messages,
+          { role: 'assistant', content: response.content },
+          { role: 'user', content: toolResults }
+        ];
+        const estimatedTokensAfter = this.messageTruncator.estimateTokenCount(testMessages, tools);
+        
+        // Use a more conservative limit (150k instead of 180k) to leave larger buffer
+        // This prevents hitting the 200k hard limit during conversation growth
+        const conservativeLimit = 150000; // 150k tokens (leaves 50k buffer for safety)
+        
+        if (estimatedTokensAfter > conservativeLimit) {
+          console.log(`⚠️  Estimated token count after tool results (${Math.round(estimatedTokensAfter/1000)}k) exceeds conservative limit (${Math.round(conservativeLimit/1000)}k), truncating before adding results...`);
+          // Truncate existing messages more aggressively to make room for new tool results
+          const targetLimit = conservativeLimit - 10000; // Leave 10k for new tool results
+          messages = this.messageTruncator.truncateMessages(messages, targetLimit, tools);
+          
+          // Re-estimate after truncation
+          const testMessagesAfterTruncate = [
+            ...messages,
+            { role: 'assistant', content: response.content },
+            { role: 'user', content: toolResults }
+          ];
+          const newEstimatedTokens = this.messageTruncator.estimateTokenCount(testMessagesAfterTruncate, tools);
+          
+          if (newEstimatedTokens > conservativeLimit) {
+            console.warn(`⚠️  Still over limit after truncation (${Math.round(newEstimatedTokens/1000)}k). Tool results may be very large.`);
+            // Further truncate tool results if still over limit
+            const toolResultsTruncated = toolResults.map(result => {
+              if (typeof result.content === 'string') {
+                const content = JSON.parse(result.content);
+                const contentStr = JSON.stringify(content);
+                if (contentStr.length > 10000) {
+                  // Truncate very large tool results
+                  const truncated = contentStr.substring(0, 10000) + '... [truncated]';
+                  return { ...result, content: truncated };
+                }
+              }
+              return result;
+            });
+            toolResults = toolResultsTruncated;
+          }
+        }
 
         // Add assistant's response with all tool_use blocks
         messages.push({
@@ -367,13 +646,11 @@ export class AgentRunner {
         // Add extra delay after tool execution to prevent rapid-fire requests
         await this.sleep(RATE_LIMITING.TOOL_EXECUTION_DELAY);
 
-        // Check token count and truncate if needed (keep under 180k to leave buffer)
-        const estimatedTokens = this.messageTruncator.estimateTokenCount(messages, tools);
-        const maxPromptTokens = TOKEN_LIMITS.MAX_PROMPT_TOKENS;
-
-        if (estimatedTokens > maxPromptTokens) {
-          console.log(`⚠️  Token count (${Math.round(estimatedTokens/1000)}k) exceeds limit, truncating messages...`);
-          messages = this.messageTruncator.truncateMessages(messages, maxPromptTokens, tools);
+        // Final check after adding messages - truncate if needed
+        const finalEstimatedTokens = this.messageTruncator.estimateTokenCount(messages, tools);
+        if (finalEstimatedTokens > conservativeLimit) {
+          console.log(`⚠️  Token count (${Math.round(finalEstimatedTokens/1000)}k) exceeds conservative limit, truncating messages...`);
+          messages = this.messageTruncator.truncateMessages(messages, conservativeLimit, tools);
         }
         
         response = await this.makeApiCall({
@@ -414,7 +691,10 @@ export class AgentRunner {
         result.folder = this.agentParams.folder;
         console.log("---------folder selected--------:" + this.agentParams.folder)
       }
-      
+      if (agentName === 'feature-telemetry-tracking' && this.agentParams.feature) {
+        result.feature = this.agentParams.feature;
+      }
+
       return result;
 
     } catch (error) {
@@ -441,11 +721,16 @@ export class AgentRunner {
       if (isPromptTooLong) {
         console.error('❌ Prompt too long error: The conversation history exceeded the 200k token limit.');
         console.error('This can happen when an agent processes many large data sources.');
+        console.error('The system has implemented:');
+        console.error('  ✓ Proactive truncation during tool use loop');
+        console.error('  ✓ Aggressive summarization of large tool results (>20k chars)');
+        console.error('  ✓ Conservative token limits (150k) to leave buffer');
         console.error('Suggestions:');
-        console.error('  1. The system will automatically truncate messages on retry');
-        console.error('  2. Consider splitting the agent work into smaller tasks');
+        console.error('  1. Reduce the date range (use --start-date and --end-date with shorter periods)');
+        console.error('  2. Split the agent work into smaller tasks');
         console.error('  3. Reduce the number of data sources processed at once');
-        console.error('  4. For officevibe-strategy-roadmap: process feedback pages in batches');
+        console.error('  4. For business-health: process fewer Slack channels or shorter time periods');
+        console.error('  5. For officevibe-strategy-roadmap: process feedback pages in batches');
       } else if (isRateLimitError) {
         console.error('Rate limit exceeded. The system will retry with exponential backoff.');
         console.error('If this persists, consider:');
@@ -464,15 +749,19 @@ export class AgentRunner {
   }
 
   /**
-   * Build context message with configuration (optimized for token usage)
+   * Build context message with configuration (optimized for token usage).
+   * @param {string} [agentName] - If provided, may return a slim context for specific agents (e.g. mixpanel-query).
    */
-  buildContextMessage() {
-    console.log('[AgentRunner] buildContextMessage called with dateRange:', this.dateRange);
+  buildContextMessage(agentName) {
+    console.log('[AgentRunner] buildContextMessage called with dateRange:', this.dateRange, 'agentName:', agentName);
     const today = new Date();
     const todayISO = today.toISOString().split('T')[0]; // YYYY-MM-DD format
 
-    // Get default days from config, default to 7 if not specified
-    const defaultDays = this.config?.settings?.defaultDays || 7;
+    // Get default days from config, default to 7 if not specified (weekly-recap and business-pulse use 5 days)
+    let defaultDays = this.config?.settings?.defaultDays || 7;
+    if ((agentName === 'weekly-recap' || agentName === 'business-pulse') && !this.dateRange) {
+      defaultDays = 5;
+    }
 
     // Use provided date range or calculate defaults
     let endDateISO = todayISO;
@@ -507,6 +796,93 @@ export class AgentRunner {
       const threeDaysAgo = new Date(today);
       threeDaysAgo.setDate(today.getDate() - 3);
       threeDaysAgoISO = threeDaysAgo.toISOString().split('T')[0];
+    }
+
+    // Slim context for mixpanel-query to stay under 200k token limit (only Mixpanel + dates)
+    if (agentName === 'mixpanel-query') {
+      const mauInsightIds = (this.config["mixpanel-insights"]?.mau || []).join(', ') || 'None';
+      const providedInsightIds = this.agentParams?.insightIds;
+      let mixpanelInsightsBlock;
+      if (providedInsightIds) {
+        const insightIdsArray = String(providedInsightIds).split(',').map(id => id.trim()).filter(id => id.length > 0);
+        mixpanelInsightsBlock = `MAU Insight (bookmark ID): ${mauInsightIds}
+**CRITICAL: FIRST query the MAU insight to get total unique organizations and users for percentage calculations**
+Insight IDs (from parameter): ${insightIdsArray.join(', ')}
+**CRITICAL: Use ONLY these bookmark IDs when querying Mixpanel insights: ${insightIdsArray.join(', ')}**
+**Chart Link Format**: https://mixpanel.com/project/${this.config.mixpanel?.projectId || 'PROJECT_ID'}/view/${this.config.mixpanel?.workspaceId || 'WORKSPACE_ID'}/app/insights/?discover=1#report/{bookmarkId}`;
+      } else {
+        const customSurveys = (this.config["mixpanel-insights"]?.customSurveys || []).join(', ') || 'None';
+        const others = (this.config["mixpanel-insights"]?.others || []).join(', ') || 'None';
+        mixpanelInsightsBlock = `MAU Insight (bookmark ID): ${mauInsightIds}
+**CRITICAL: FIRST query the MAU insight to get total unique organizations and users for percentage calculations**
+Custom Surveys (bookmark IDs): ${customSurveys}
+Other Insights (bookmark IDs): ${others}
+**CRITICAL: Use ALL bookmark IDs from config["mixpanel-insights"].customSurveys and config["mixpanel-insights"].others when querying Mixpanel insights.**
+**Chart Link Format**: https://mixpanel.com/project/${this.config.mixpanel?.projectId || 'PROJECT_ID'}/view/${this.config.mixpanel?.workspaceId || 'WORKSPACE_ID'}/app/insights/?discover=1#report/{bookmarkId}`;
+      }
+      return `# Configuration (Mixpanel Agent – Slim)
+
+## Dates
+Start: ${startDateISO} | End: ${endDateISO}
+
+## Mixpanel
+Project ID: ${this.config.mixpanel?.projectId || 'N/A'}
+Workspace ID: ${this.config.mixpanel?.workspaceId || 'N/A'}
+**CRITICAL: ALWAYS include projectId and workspaceId in Mixpanel MCP tool calls.**
+
+## Mixpanel Insights
+${mixpanelInsightsBlock}
+
+## Dates (CRITICAL)
+**Current Date**: ${todayISO}
+**Analysis Period**: ${startDateISO} to ${endDateISO} (inclusive). Use ISO format YYYY-MM-DD for date params.`;
+    }
+
+    // Slim context for feature-telemetry-tracking: one feature's telemetry + MAU + dates
+    if (agentName === 'feature-telemetry-tracking') {
+      const mauIds = (this.config["mixpanel-insights"]?.mau || []).join(', ') || 'None';
+      const rawFeature = this.agentParams?.feature;
+      const featureKeyTrimmed = typeof rawFeature === 'string' ? rawFeature.trim() : (rawFeature ? String(rawFeature).trim() : '');
+      const releases = this.config.releases || {};
+      let release = featureKeyTrimmed ? releases[featureKeyTrimmed] : null;
+      let featureKey = featureKeyTrimmed;
+      if (!release && featureKeyTrimmed) {
+        const entry = Object.entries(releases).find(
+          ([k, r]) => (r.name || k).toLowerCase() === featureKeyTrimmed.toLowerCase()
+        );
+        if (entry) {
+          featureKey = entry[0];
+          release = entry[1];
+        }
+      }
+      const featureName = release?.name || featureKey || 'Unknown';
+      const telemetry = release?.telemetry;
+      const telemetryStr = Array.isArray(telemetry)
+        ? telemetry.join(', ')
+        : (typeof telemetry === 'string' && telemetry ? telemetry : 'None');
+      return `# Configuration (Feature Telemetry – Slim)
+
+## Dates
+Start: ${startDateISO} | End: ${endDateISO}
+
+## Mixpanel
+Project ID: ${this.config.mixpanel?.projectId || 'N/A'}
+Workspace ID: ${this.config.mixpanel?.workspaceId || 'N/A'}
+**CRITICAL: ALWAYS include projectId and workspaceId in Mixpanel MCP tool calls.**
+
+## Overall MAU (baseline for adoption %)
+MAU Insight (bookmark ID): ${mauIds}
+**CRITICAL: FIRST query the MAU insight to get total unique users/organizations, then use that as the denominator for feature adoption %.**
+
+## Selected Feature
+Feature name: ${featureName}
+Feature key: ${featureKey || 'N/A'}
+**Telemetry (report IDs or URL for this feature)**: ${telemetryStr}
+**Use only the telemetry value above** when querying this feature's Mixpanel report(s). If numeric IDs, query each with the Mixpanel MCP. If a URL, include it in the report as the feature report link.
+
+## Dates (CRITICAL)
+**Current Date**: ${todayISO}
+**Analysis Period**: ${startDateISO} to ${endDateISO} (inclusive). Use ISO format YYYY-MM-DD for date params.`;
     }
 
     // Build concise configuration - only include essential values
@@ -576,8 +952,40 @@ Product filter: ${this.config.hubspot?.productFilter || 'N/A'}
 
 ## Mixpanel
 Project ID: ${this.config.mixpanel?.projectId || 'N/A'}
+Workspace ID: ${this.config.mixpanel?.workspaceId || 'N/A'}
 Username: ${this.config.mixpanel?.username ? 'Set' : 'N/A'}
 **CRITICAL: When calling Mixpanel MCP tools, ALWAYS include the projectId parameter using the value from config.mixpanel.projectId (${this.config.mixpanel?.projectId || 'NOT SET - CHECK CONFIG'}). The projectId is required for all Mixpanel queries.**
+**CRITICAL: Always include workspaceId parameter using the value from config.mixpanel.workspaceId (${this.config.mixpanel?.workspaceId || 'NOT SET - CHECK CONFIG'}).**
+
+## Mixpanel Insights
+${(() => {
+      // MAU insight ID for baseline calculations
+      const mauInsightIds = (this.config["mixpanel-insights"]?.mau || []).join(', ') || 'None';
+      
+      // If insightIds parameter is provided, use it; otherwise use config defaults
+      const providedInsightIds = this.agentParams?.insightIds;
+      if (providedInsightIds) {
+        // Parse comma-separated list
+        const insightIdsArray = providedInsightIds.split(',').map(id => id.trim()).filter(id => id.length > 0);
+        return `MAU Insight (bookmark ID): ${mauInsightIds}
+**CRITICAL: FIRST query the MAU insight to get total unique organizations and users for percentage calculations**
+Insight IDs (from parameter): ${insightIdsArray.join(', ')}
+**CRITICAL: Use ONLY these bookmark IDs when querying Mixpanel insights: ${insightIdsArray.join(', ')}**
+**Chart Link Format**: For each insight report, include a link to the Mixpanel chart: https://mixpanel.com/project/${this.config.mixpanel?.projectId || 'PROJECT_ID'}/view/${this.config.mixpanel?.workspaceId || 'WORKSPACE_ID'}/app/insights/?discover=1#report/{bookmarkId} (replace {bookmarkId} with the actual insight ID)`;
+      } else {
+        // Use config defaults
+        const customSurveys = (this.config["mixpanel-insights"]?.customSurveys || []).join(', ') || 'None';
+        const others = (this.config["mixpanel-insights"]?.others || []).join(', ') || 'None';
+        const specificNetwork = (this.config["mixpanel-insights"]?.specificNetwork || []).join(', ') || 'None';
+        return `MAU Insight (bookmark ID): ${mauInsightIds}
+**CRITICAL: FIRST query the MAU insight to get total unique organizations and users for percentage calculations**
+Custom Surveys (bookmark IDs): ${customSurveys}
+Other Insights (bookmark IDs): ${others}
+Specific Network (bookmark IDs): ${specificNetwork}
+**CRITICAL: Use ALL bookmark IDs from config["mixpanel-insights"].customSurveys and config["mixpanel-insights"].others when querying Mixpanel insights. DO NOT hardcode insight IDs - always use the values from this configuration.**
+**Chart Link Format**: For each insight report, include a link to the Mixpanel chart: https://mixpanel.com/project/${this.config.mixpanel?.projectId || 'PROJECT_ID'}/view/${this.config.mixpanel?.workspaceId || 'WORKSPACE_ID'}/app/insights/?discover=1#report/{bookmarkId} (replace {bookmarkId} with the actual insight ID)`;
+      }
+    })()}
 
 ## Thought Leadership
 RSS Feeds: ${(this.config.thoughtleadership?.rssFeeds || []).join(', ') || 'None'}
@@ -639,6 +1047,9 @@ ${(() => {
     // Define health agents (only use health MCPs)
     const healthAgents = ['mydailyhealth'];
     
+    // Define agents that should include health MCPs (for health check-ins)
+    const agentsWithHealthMCPs = ['daily-brief'];
+    
     // Get MCP configuration from config
     const mcpConfig = this.config?.mcp || {};
     const healthServers = mcpConfig.health?.servers || [];
@@ -684,8 +1095,12 @@ ${(() => {
         console.warn(`[buildToolsSchema] ⚠️  Health MCP servers configured but not found/connected: ${unmatchedHealthServers.join(', ')}`);
         console.warn(`[buildToolsSchema] ⚠️  Please verify these servers are configured in Claude Desktop and connected successfully`);
       }
+    } else if (agentsWithHealthMCPs.includes(agentName)) {
+      // For agents that need health MCPs (like daily-brief), include all tools (work + health)
+      // Don't filter out health MCP servers - these agents need both work and health tools
+      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: including health MCPs (${healthServers.join(', ')}) for health check-in, ${filteredTools.length} tools available`);
     } else {
-      // For work agents, exclude health MCP servers
+      // For other work agents, exclude health MCP servers
       filteredTools = availableTools.filter(tool => {
         const serverName = tool.server.toLowerCase();
         return !healthServers.some(healthServer => 
@@ -695,12 +1110,41 @@ ${(() => {
       console.log(`[buildToolsSchema] Filtered tools for ${agentName}: excluded health MCPs (${healthServers.join(', ')}), ${filteredTools.length} tools available`);
     }
 
+    // For mixpanel-query agent, ONLY include Mixpanel MCP tools to avoid 200k+ token prompt
+    if (agentName === 'mixpanel-query') {
+      const beforeCount = filteredTools.length;
+      filteredTools = filteredTools.filter(tool => {
+        const server = (tool.server || '').toLowerCase();
+        return server.includes('mixpanel');
+      });
+      console.log(`[buildToolsSchema] Filtered tools for mixpanel-query: Mixpanel-only, ${filteredTools.length}/${beforeCount} tools (reduces prompt size significantly)`);
+    }
+
     // For telemetry-from-slack agent, exclude tools from "mixpanel-mcp" server
     // Use only tools from "mixpanel" server for Mixpanel operations
     if (agentName === 'telemetry-from-slack') {
       filteredTools = filteredTools.filter(tool => tool.server !== 'mixpanel-mcp');
       const mixpanelTools = filteredTools.filter(tool => tool.server === 'mixpanel');
       console.log(`[buildToolsSchema] Filtered tools for telemetry-from-slack: excluded "mixpanel-mcp", ${mixpanelTools.length} tools from "mixpanel" server, ${filteredTools.length} total tools available`);
+    }
+
+    // For specific-network-telemetry agent, only include Mixpanel tools
+    // This agent focuses exclusively on querying Mixpanel Insights reports
+    if (agentName === 'specific-network-telemetry') {
+      filteredTools = filteredTools.filter(tool => {
+        const serverName = tool.server.toLowerCase();
+        return serverName.includes('mixpanel');
+      });
+      console.log(`[buildToolsSchema] Filtered tools for specific-network-telemetry: Mixpanel-only, ${filteredTools.length} tools available`);
+    }
+
+    // For feature-telemetry-tracking agent, only include Mixpanel tools
+    if (agentName === 'feature-telemetry-tracking') {
+      filteredTools = filteredTools.filter(tool => {
+        const serverName = (tool.server || '').toLowerCase();
+        return serverName.includes('mixpanel');
+      });
+      console.log(`[buildToolsSchema] Filtered tools for feature-telemetry-tracking: Mixpanel-only, ${filteredTools.length} tools available`);
     }
 
     const mcpTools = filteredTools.map(tool => ({

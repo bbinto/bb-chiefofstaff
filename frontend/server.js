@@ -47,11 +47,50 @@ function passwordProtection(req, res, next) {
 // Apply password protection to all routes except static files
 app.use(passwordProtection);
 
-// Path to reports folder (one level up from frontend)
-const REPORTS_DIR = path.join(__dirname, '..', PATHS.REPORTS_DIR);
+// Debug: Log all requests (useful for Vercel debugging)
+if (process.env.VERCEL === '1') {
+  app.use((req, res, next) => {
+    console.log(`[Vercel Debug] ${req.method} ${req.path}`);
+    next();
+  });
+}
 
-// Path to config.json (one level up from frontend)
-const CONFIG_PATH = path.join(__dirname, '..', 'config.json');
+// Path to reports folder - use frontend/reports for Vercel, fallback to parent for local
+const REPORTS_DIR = process.env.VERCEL === '1' 
+  ? path.join(__dirname, 'reports')
+  : path.join(__dirname, '..', PATHS.REPORTS_DIR);
+
+// Path to config.json - use frontend/config.json for Vercel, fallback to parent for local
+// On Vercel, config can come from APP_CONFIG_JSON environment variable (as JSON string)
+const CONFIG_PATH = process.env.VERCEL === '1'
+  ? path.join(__dirname, 'config.json')
+  : path.join(__dirname, '..', 'config.json');
+
+// Helper function to load config (from file or environment variable)
+function loadConfig() {
+  // On Vercel, try environment variable first
+  if (process.env.VERCEL === '1' && process.env.APP_CONFIG_JSON) {
+    try {
+      return JSON.parse(process.env.APP_CONFIG_JSON);
+    } catch (error) {
+      console.error('Error parsing APP_CONFIG_JSON environment variable:', error);
+      // Fall back to file if env var is invalid
+    }
+  }
+  
+  // Fall back to reading from file
+  if (fs.existsSync(CONFIG_PATH)) {
+    try {
+      const configContent = fs.readFileSync(CONFIG_PATH, 'utf-8');
+      return JSON.parse(configContent);
+    } catch (error) {
+      console.error('Error reading config file:', error);
+      throw error;
+    }
+  }
+  
+  return null;
+}
 
 // Serve static files from dist folder if it exists (production build)
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -331,6 +370,17 @@ app.post('/api/run-agents', async (req, res) => {
       return res.status(400).json({ error: 'No agents specified' });
     }
 
+    // Feature Telemetry Tracking requires a feature (release key from config.releases)
+    if (agents.includes('feature-telemetry-tracking')) {
+      const feature = parameters?.feature?.trim?.() || parameters?.feature || '';
+      if (!feature) {
+        return res.status(400).json({
+          error: 'Feature required',
+          details: 'Please select a feature from the "Feature (release)" dropdown when running Feature Telemetry Tracking.'
+        });
+      }
+    }
+
     console.log('Received agent execution request:', { agents, dateRange, parameters });
 
     // Build command arguments
@@ -366,9 +416,24 @@ app.post('/api/run-agents', async (req, res) => {
     if (parameters?.week) {
       args.push('--week', parameters.week);
     }
+    if (parameters?.insightIds) {
+      // For comma-separated values, ensure they're passed as a single argument
+      // The value may contain spaces after commas (e.g., "87660800, 87660767, 87660827")
+      // which should be preserved as a single argument
+      args.push('--insight-ids', parameters.insightIds.trim());
+      console.log('[Server] Adding insightIds parameter:', parameters.insightIds.trim());
+    }
+    if (parameters?.feature) {
+      const featureVal = typeof parameters.feature === 'string' ? parameters.feature.trim() : String(parameters.feature || '').trim();
+      if (featureVal) {
+        args.push('--feature', featureVal);
+        console.log('[Server] Adding feature parameter:', featureVal);
+      }
+    }
 
     const commandStr = `npm ${args.join(' ')}`;
     console.log('Executing command:', commandStr);
+    console.log('[Server] Args array:', JSON.stringify(args));
 
     // Execute the command
     const { spawn } = await import('child_process');
@@ -465,15 +530,79 @@ app.get('/api/execution/:executionId', (req, res) => {
   res.json(execution);
 });
 
+// Anthropic Usage & Billing (Admin API optional)
+// Balance and spending limit are only visible in Console; we can fetch period spend via Cost API when Admin key is set.
+const ANTHROPIC_ADMIN_API_KEY = process.env.ANTHROPIC_ADMIN_API_KEY || null;
+const ANTHROPIC_BILLING_URL = 'https://console.anthropic.com/settings/billing';
+
+app.get('/api/anthropic-usage', async (req, res) => {
+  try {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    const startingAt = startOfMonth.toISOString();
+    const endingAt = endOfMonth.toISOString();
+
+    let periodSpend = null;
+    let periodSpendError = null;
+
+    if (ANTHROPIC_ADMIN_API_KEY) {
+      try {
+        const url = `https://api.anthropic.com/v1/organizations/cost_report?starting_at=${encodeURIComponent(startingAt)}&ending_at=${encodeURIComponent(endingAt)}&bucket_width=1d&limit=31`;
+        const apiRes = await fetch(url, {
+          headers: {
+            'anthropic-version': '2023-06-01',
+            'x-api-key': ANTHROPIC_ADMIN_API_KEY
+          }
+        });
+        if (apiRes.ok) {
+          const data = await apiRes.json();
+          let totalCents = 0;
+          for (const bucket of data.data || []) {
+            for (const item of bucket.results || []) {
+              const amount = parseFloat(item.amount);
+              if (!Number.isNaN(amount)) totalCents += amount;
+            }
+          }
+          periodSpend = totalCents / 100; // amount is in cents
+        } else {
+          periodSpendError = apiRes.status === 401 ? 'Invalid Admin API key' : `API ${apiRes.status}`;
+        }
+      } catch (err) {
+        periodSpendError = err.message || 'Failed to fetch cost report';
+      }
+    }
+
+    res.json({
+      balance: null,
+      balanceNote: 'View in Console',
+      limit: null,
+      limitNote: 'View in Console',
+      periodSpend,
+      periodSpendError,
+      periodLabel: `${startOfMonth.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} spend`,
+      linkToBilling: ANTHROPIC_BILLING_URL,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error in anthropic-usage:', error);
+    res.status(500).json({
+      error: 'Failed to get Anthropic usage',
+      details: error.message,
+      linkToBilling: ANTHROPIC_BILLING_URL
+    });
+  }
+});
+
 // Get config.json
 app.get('/api/config', (req, res) => {
   try {
-    if (!fs.existsSync(CONFIG_PATH)) {
-      return res.status(404).json({ error: 'Config file not found' });
+    const config = loadConfig();
+    
+    if (!config) {
+      return res.status(404).json({ error: 'Config not found' });
     }
 
-    const configContent = fs.readFileSync(CONFIG_PATH, 'utf-8');
-    const config = JSON.parse(configContent);
     res.json(config);
   } catch (error) {
     console.error('Error reading config:', error);
@@ -491,8 +620,17 @@ app.put('/api/config', (req, res) => {
       return res.status(400).json({ error: 'Invalid config format' });
     }
 
-    // Create a backup of the current config
-    const backupPath = path.join(__dirname, '..', `config.backup.${Date.now()}.json`);
+    // On Vercel, file system is read-only - config updates must be done via environment variables
+    if (process.env.VERCEL === '1') {
+      return res.status(403).json({ 
+        error: 'Config updates not supported on Vercel',
+        message: 'Please update APP_CONFIG_JSON environment variable in Vercel Dashboard and redeploy'
+      });
+    }
+
+    // Create a backup of the current config (in same directory as config.json)
+    const configDir = path.dirname(CONFIG_PATH);
+    const backupPath = path.join(configDir, `config.backup.${Date.now()}.json`);
     if (fs.existsSync(CONFIG_PATH)) {
       fs.copyFileSync(CONFIG_PATH, backupPath);
       console.log(`Config backup created at: ${backupPath}`);
@@ -744,8 +882,21 @@ app.get('/*.md', (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://0.0.0.0:${PORT}`);
-  console.log(`Access from network at http://10.88.111.20:${PORT}`);
-});
+// Export app for Vercel serverless function use
+export default app;
+
+// Only start server if running directly (not as serverless function)
+// Check if this module is being executed directly vs imported
+const isVercel = process.env.VERCEL === '1';
+const isMainModule = process.argv[1] && 
+                     (import.meta.url === `file://${process.argv[1]}` || 
+                      process.argv[1].endsWith('server.js') ||
+                      import.meta.url.endsWith('server.js'));
+
+if (!isVercel && isMainModule) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Access from network at http://10.88.111.20:${PORT}`);
+  });
+}
 

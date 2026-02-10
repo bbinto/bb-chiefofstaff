@@ -19,8 +19,10 @@ export function parseAgentParams(args) {
   const emailIndex = args.indexOf('--email');
   const weekIndex = args.indexOf('--week');
   const reportFileIndex = args.indexOf('--report-file');
+  const insightIdsIndex = args.indexOf('--insight-ids');
+  const featureIndex = args.indexOf('--feature');
 
-  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex, 'email:', emailIndex, 'week:', weekIndex, 'reportFile:', reportFileIndex);
+  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex, 'email:', emailIndex, 'week:', weekIndex, 'reportFile:', reportFileIndex, 'feature:', featureIndex);
 
   if (slackUserIdIndex !== -1 && args[slackUserIdIndex + 1]) {
     params.slackUserId = args[slackUserIdIndex + 1];
@@ -56,6 +58,29 @@ export function parseAgentParams(args) {
     }
   }
 
+  if (insightIdsIndex !== -1 && args[insightIdsIndex + 1]) {
+    // Get the value - it might be split across multiple args if spaces are present
+    // Check if there are more args that might be part of the value
+    let value = args[insightIdsIndex + 1];
+    let nextIndex = insightIdsIndex + 2;
+    
+    // If the value doesn't contain a comma but we expect comma-separated values,
+    // check if subsequent args are part of the list (not another flag)
+    if (!value.includes(',') && nextIndex < args.length && !args[nextIndex].startsWith('--')) {
+      // Collect all following args until we hit another flag or run out
+      const valueParts = [value];
+      while (nextIndex < args.length && !args[nextIndex].startsWith('--')) {
+        valueParts.push(args[nextIndex]);
+        nextIndex++;
+      }
+      value = valueParts.join(' ');
+    }
+    
+    params.insightIds = value;
+    console.log('[CLI Parser] Found insightIds (raw):', value);
+    console.log('[CLI Parser] Parsed insightIds array:', value.split(',').map(id => id.trim()).filter(id => id.length > 0));
+  }
+
   if (weekIndex !== -1 && args[weekIndex + 1]) {
     params.week = args[weekIndex + 1];
     console.log('[CLI Parser] Found week:', params.week);
@@ -76,6 +101,11 @@ export function parseAgentParams(args) {
         `Warning: Report file "${params.reportFile}" doesn't end with .md (should be like "reports/business-health-2025-01-12-10-30-00.md")`
       );
     }
+  }
+
+  if (featureIndex !== -1 && args[featureIndex + 1]) {
+    params.feature = String(args[featureIndex + 1]).trim();
+    console.log('[CLI Parser] Found feature:', params.feature);
   }
 
   console.log('[CLI Parser] Final parsed params:', params);
@@ -100,7 +130,9 @@ export function extractAgentNames(args) {
     '--folder',
     '--email',
     '--week',
-    '--report-file'
+    '--report-file',
+    '--insight-ids',
+    '--feature'
   ];
 
   for (let i = 0; i < args.length; i++) {
@@ -172,6 +204,7 @@ Available Agents:
   - business-health                 Officevibe business and product health
   - product-engineering             Product development and engineering updates
   - okr-progress                    OKR updates and progress tracking
+  - release-tracker                 Track product releases with adoption metrics, feedback, and OKR alignment
   - quarterly-review               Quarterly review of product releases and OKR updates
   - quarterly-performance-review   Quarterly performance review for Director of Product
   - thoughtleadership-updates      Product thought leadership and new topics
@@ -267,5 +300,15 @@ export function validateAgentRequirements(specificAgents, agentParams) {
   ) {
     console.warn(`\n⚠️  Warning: tts agent requires --report-file parameter.`);
     console.warn(`   Example: npm start -- tts --report-file "reports/business-health-2025-01-12-10-30-00.md"\n`);
+  }
+
+  // Warn if feature-telemetry-tracking is run without feature
+  if (
+    specificAgents &&
+    specificAgents.includes('feature-telemetry-tracking') &&
+    !agentParams.feature
+  ) {
+    console.warn(`\n⚠️  Warning: feature-telemetry-tracking requires --feature parameter (a release key from config.releases).`);
+    console.warn(`   Example: npm start -- feature-telemetry-tracking --feature help_me_reply\n`);
   }
 }
