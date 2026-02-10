@@ -30,7 +30,6 @@ function AgentRunner({ password, onClose }) {
     { name: 'epp', displayName: 'Employee Personality Profile', description: 'Generate personality profile using Myers-Briggs and Insights frameworks', requiresParam: 'email', lastRun: null },
     { name: 'weekly-executive-summary', displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
     { name: 'good-vibes-recognition', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null },
-    { name: 'kf-officevibe-insights', displayName: 'KF Officevibe Insights', description: 'Korn Ferry Officevibe insights: manager activity, Good Vibes, feedback rates, and historical trends', lastRun: null },
     { name: 'mydailyhealth', displayName: 'My Daily Health', description: 'Review yesterday\'s health information and today\'s predictions from Oura, Withings, and Strava', isPrivate: true, lastRun: null }
      
   ])
