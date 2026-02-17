@@ -46,6 +46,7 @@ Thumbs.db
 coverage/
 .nyc_output/
 /.cache
+.api
 .vercel
 .env*.local
 /.claude
@@ -54,6 +55,7 @@ agents/business-health.md
 agents/business-pulse.md
 agents/okr-progress.md
 agents/thoughtleadership-updates.md
+agents/kf-officevibe-insights.md
 CLAUDE.md
 COMPETITIVE_ANALYSIS.md
 config-compact.json
@@ -62,4 +64,7 @@ fix-mixpanel-mcp-config.js
 frontend/vercel.json
 frontend/vite.config.js
 MIXPANEL_MCP_SETUP.md
+/.api
+
+agents/good-vibes-recognition.md
 Untitled

@@ -770,20 +770,18 @@ export class AgentRunner {
     
     if (this.dateRange) {
       endDateISO = this.dateRange.endDate || todayISO;
-      
+      const endDateObj = new Date(endDateISO + 'T00:00:00');
+
       // If start date is not provided, default to configured days before end date
       if (this.dateRange.startDate) {
         startDateISO = this.dateRange.startDate;
       } else {
-        // Default start date to configured days before end date
-        const endDateObj = new Date(endDateISO + 'T00:00:00');
         const defaultDaysAgo = new Date(endDateObj);
         defaultDaysAgo.setDate(endDateObj.getDate() - defaultDays);
         startDateISO = defaultDaysAgo.toISOString().split('T')[0];
       }
-      
+
       // Calculate 3 days ago from end date
-      const endDateObj = new Date(endDateISO + 'T00:00:00');
       const threeDaysAgo = new Date(endDateObj);
       threeDaysAgo.setDate(endDateObj.getDate() - 3);
       threeDaysAgoISO = threeDaysAgo.toISOString().split('T')[0];
@@ -1118,14 +1116,6 @@ ${(() => {
         return server.includes('mixpanel');
       });
       console.log(`[buildToolsSchema] Filtered tools for mixpanel-query: Mixpanel-only, ${filteredTools.length}/${beforeCount} tools (reduces prompt size significantly)`);
-    }
-
-    // For telemetry-from-slack agent, exclude tools from "mixpanel-mcp" server
-    // Use only tools from "mixpanel" server for Mixpanel operations
-    if (agentName === 'telemetry-from-slack') {
-      filteredTools = filteredTools.filter(tool => tool.server !== 'mixpanel-mcp');
-      const mixpanelTools = filteredTools.filter(tool => tool.server === 'mixpanel');
-      console.log(`[buildToolsSchema] Filtered tools for telemetry-from-slack: excluded "mixpanel-mcp", ${mixpanelTools.length} tools from "mixpanel" server, ${filteredTools.length} total tools available`);
     }
 
     // For specific-network-telemetry agent, only include Mixpanel tools

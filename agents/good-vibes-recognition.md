@@ -11,6 +11,7 @@ Analyze conversations across all available Slack channels to identify team membe
 ### 1. Channel Discovery
 **CRITICAL: You MUST analyze ALL available Slack channels from the config file:**
 - **Team channels** (`config.slack.channels.teamChannels`) - All channels in this array
+- **Performance channels** (`config.slack.channels.performanceChannels`) - All channels in this array
 - **Product general channels** (`config.slack.channels.productGeneral`) - All channels in this array/string
 - **Product feedback channels** (`config.slack.channels.productFeedback`) - All channels in this array
 - **Sales channels** (`config.slack.channels.salesChannels`) - All channels in this array
@@ -18,6 +19,7 @@ Analyze conversations across all available Slack channels to identify team membe
 
 **IMPORTANT:**
 - Go through EVERY channel listed in the config file - do not skip any
+- prioritize performanceChannels "C09RH79R339" 
 - Use the channel IDs directly from the config (they are Slack channel IDs like "C01234567AB")
 - Use Slack MCP tools (`conversations_history`, `conversations_search_messages`) to analyze messages in each channel
 - **CRITICAL**: When calling Slack MCP tools, use the parameter name `channel_id` (e.g., `channel_id: "C01234567AB"`), NOT `channel`

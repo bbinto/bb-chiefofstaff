@@ -756,7 +756,6 @@ function ReportViewer({ report, onBack, password }) {
       'product-engineering': 'from-[#00203F] to-teal-600',
       'okr-progress': 'from-teal-600 to-cyan-500',
       'release-tracker': 'from-indigo-600 to-purple-600',
-      'telemetry-from-slack': 'from-purple-500 to-teal-500',
       'telemetry-deepdive': 'from-purple-500 to-teal-500',
       'mixpanel-query': 'from-purple-500 to-teal-500',
       'feature-telemetry-tracking': 'from-purple-500 to-teal-500',
