@@ -221,13 +221,24 @@ class ChiefOfStaffAgent {
     console.log('GENERATING REPORT');
     console.log('='.repeat(80) + '\n');
 
-    const reportPath = await this.reportGenerator.generateReport(results);
-    const summary = this.reportGenerator.generateSummary(results);
+    try {
+      const reportPath = await this.reportGenerator.generateReport(results);
+      const summary = this.reportGenerator.generateSummary(results);
 
-    console.log(summary);
-    console.log(`\nFull report saved to: ${reportPath}`);
+      console.log(summary);
+      console.log(`\nFull report saved to: ${reportPath}`);
 
-    return reportPath;
+      return reportPath;
+    } catch (error) {
+      console.error('\n❌ ERROR generating or saving report:');
+      console.error(`   Error: ${error.message}`);
+      console.error(`   Stack: ${error.stack}`);
+      console.error('\nTroubleshooting:');
+      console.error('  - Verify the reports/ directory exists and is writable');
+      console.error('  - Check disk space availability');
+      console.error('  - Ensure proper file permissions in the project root');
+      throw error;
+    }
   }
 
   /**

@@ -25,6 +25,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "dotenv": "^16.4.5",
     "mermaid": "^11.12.2",
+    "openai": "^4.52.0",
     "pdf-parse": "^1.1.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }

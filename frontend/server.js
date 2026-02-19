@@ -15,8 +15,19 @@ const PORT = FRONTEND.PORT;
 // Password protection configuration
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
 
+// LLM Settings - stored in memory (defaults from environment)
+let llmSettings = {
+  useOllama: process.env.USE_OLLAMA === 'true',
+  ollamaModel: process.env.OLLAMA_MODEL || 'mistral',
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+  claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929'
+};
+
 app.use(cors());
 app.use(express.json());
+
+// Track active background executions (podcast jobs, agent runs)
+const activeExecutions = new Map();
 
 // Password protection middleware
 function passwordProtection(req, res, next) {
@@ -328,6 +339,181 @@ app.delete('/api/reports/:filename', (req, res) => {
   }
 });
 
+// Create a podcast from a markdown report (starts conversion and returns executionId)
+app.post('/api/reports/:filename/podcast', async (req, res) => {
+  try {
+    const filename = req.params.filename;
+
+    // Security check: prevent path traversal
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const filePath = path.join(REPORTS_DIR, filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // Load config to find md2podcast path (optional)
+    const config = loadConfig();
+    const md2podcastPath = process.env.MD2PODCAST_PATH || config?.md2podcastPath || null;
+
+    if (!md2podcastPath) {
+      return res.status(400).json({ error: 'md2podcast path not configured. Set MD2PODCAST_PATH or md2podcastPath in config.json' });
+    }
+
+    // Validate output path
+    const baseName = filename.replace(/\.md$/i, '');
+    const outFilename = `${baseName}.mp3`;
+    const outPath = path.join(REPORTS_DIR, outFilename);
+
+    // Build command args. If md2podcast is a .py file, use python3 to run it.
+    const args = [];
+    let cmd = md2podcastPath;
+    if (md2podcastPath.endsWith('.py')) {
+      cmd = 'python3';
+      args.push(md2podcastPath);
+    }
+
+    // Default args: input file and output file (positional for md2podcast)
+    args.push(filePath);
+    args.push(outPath);
+
+    // Determine engine/voice/rate: prefer request body, then env vars, then config, then sensible defaults
+    const engine = req.body?.engine || process.env.MD2PODCAST_ENGINE || config?.md2podcastEngine || 'edge';
+    if (engine) {
+      args.push('--engine', engine);
+    }
+
+    const voice = req.body?.voice || process.env.MD2PODCAST_VOICE || config?.md2podcastVoice || '';
+    if (voice) {
+      args.push('--voice', voice);
+    }
+
+    // Normalize rate for different engines. `edge` expects a signed percentage string like +10% or -10%.
+    const rawRate = req.body?.rate ?? process.env.MD2PODCAST_RATE ?? config?.md2podcastRate ?? null;
+    if (rawRate !== null && rawRate !== undefined && rawRate !== '') {
+      let rateArg = null;
+      // If engine is 'edge', convert numeric rates (1.0 = +0%) to signed percentage strings
+      if (String(engine).toLowerCase() === 'edge') {
+        const maybeNumber = Number(rawRate);
+        if (!Number.isNaN(maybeNumber)) {
+          const percent = Math.round((maybeNumber - 1.0) * 100);
+          const sign = percent >= 0 ? '+' : '';
+          rateArg = `${sign}${percent}%`;
+        } else if (/^[+-]?\d+%$/.test(String(rawRate))) {
+          // Already a percentage string
+          rateArg = String(rawRate).startsWith('+') || String(rawRate).startsWith('-') ? String(rawRate) : `+${String(rawRate)}`;
+        }
+      } else {
+        // For other engines, pass the raw value as-is (string)
+        rateArg = String(rawRate);
+      }
+
+      if (rateArg) {
+        args.push('--rate', rateArg);
+      }
+    }
+
+    // Spawn the process and track execution in activeExecutions
+    const { spawn } = await import('child_process');
+    const child = spawn(cmd, args, {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env }
+    });
+
+    if (!child.pid) {
+      throw new Error('Failed to spawn md2podcast process');
+    }
+
+    const executionId = `podcast-${Date.now()}`;
+    activeExecutions.set(executionId, {
+      pid: child.pid,
+      filename,
+      outPath,
+      logs: [],
+      status: 'running',
+      startTime: new Date()
+    });
+
+    // Record the full command string for debugging in the UI
+    try {
+      const quotedArgs = args.map(a => (String(a).includes(' ') ? `"${String(a)}"` : String(a))).join(' ');
+      const cmdLine = `${cmd} ${quotedArgs}`.trim();
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.command = cmdLine;
+        execution.logs.push({ type: 'info', message: `Command: ${cmdLine}`, timestamp: new Date() });
+      }
+    } catch (err) {
+      console.error('Error recording command for execution:', err);
+    }
+
+    child.stdout.on('data', (data) => {
+      const log = data.toString();
+      console.log(`[md2podcast stdout] ${log}`);
+      const execution = activeExecutions.get(executionId);
+      if (execution) execution.logs.push({ type: 'stdout', message: log, timestamp: new Date() });
+    });
+
+    child.stderr.on('data', (data) => {
+      const log = data.toString();
+      console.error(`[md2podcast stderr] ${log}`);
+      const execution = activeExecutions.get(executionId);
+      if (execution) execution.logs.push({ type: 'stderr', message: log, timestamp: new Date() });
+    });
+
+    child.on('exit', (code) => {
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.status = code === 0 ? 'completed' : 'failed';
+        execution.exitCode = code;
+        execution.endTime = new Date();
+      }
+      console.log(`md2podcast process exited with code ${code}`);
+    });
+
+    child.on('error', (err) => {
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.status = 'error';
+        execution.error = err.message;
+        execution.logs.push({ type: 'error', message: err.message, timestamp: new Date() });
+      }
+      console.error('md2podcast spawn error:', err);
+    });
+
+    res.json({ success: true, executionId, outFilename });
+  } catch (error) {
+    console.error('Error creating podcast:', error);
+    res.status(500).json({ error: 'Failed to create podcast', details: error.message });
+  }
+});
+
+// Download generated podcast file
+app.get('/api/reports/:filename/podcast', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const baseName = filename.replace(/\.md$/i, '');
+    const outFilename = `${baseName}.mp3`;
+    const outPath = path.join(REPORTS_DIR, outFilename);
+
+    if (!fs.existsSync(outPath)) {
+      return res.status(404).json({ error: 'Podcast file not found' });
+    }
+
+    res.download(outPath, outFilename);
+  } catch (error) {
+    console.error('Error downloading podcast:', error);
+    res.status(500).json({ error: 'Failed to download podcast', details: error.message });
+  }
+});
+
 // Get unique agent names
 app.get('/api/agents', (req, res) => {
   try {
@@ -357,9 +543,6 @@ app.get('/api/agents', (req, res) => {
     res.status(500).json({ error: 'Failed to read agents', details: error.message });
   }
 });
-
-// Store active executions for progress tracking
-const activeExecutions = new Map();
 
 // Run agents endpoint with real-time progress
 app.post('/api/run-agents', async (req, res) => {
@@ -435,12 +618,21 @@ app.post('/api/run-agents', async (req, res) => {
     console.log('Executing command:', commandStr);
     console.log('[Server] Args array:', JSON.stringify(args));
 
-    // Execute the command
+    // Execute the command with LLM settings as environment variables
     const { spawn } = await import('child_process');
+    const env = {
+      ...process.env,
+      USE_OLLAMA: llmSettings.useOllama.toString(),
+      OLLAMA_MODEL: llmSettings.ollamaModel,
+      OLLAMA_BASE_URL: llmSettings.ollamaBaseUrl,
+      CLAUDE_MODEL: llmSettings.claudeModel
+    };
+
     const child = spawn('npm', args, {
       cwd: path.join(__dirname, '..'),
       shell: true,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env
     });
 
     if (!child.pid) {
@@ -644,6 +836,44 @@ app.put('/api/config', (req, res) => {
   } catch (error) {
     console.error('Error updating config:', error);
     res.status(500).json({ error: 'Failed to update config', details: error.message });
+  }
+});
+
+// Get LLM settings
+app.get('/api/settings/llm', (req, res) => {
+  try {
+    res.json(llmSettings);
+  } catch (error) {
+    console.error('Error reading LLM settings:', error);
+    res.status(500).json({ error: 'Failed to read settings', details: error.message });
+  }
+});
+
+// Update LLM settings
+app.put('/api/settings/llm', (req, res) => {
+  try {
+    const { useOllama, ollamaModel, ollamaBaseUrl, claudeModel } = req.body;
+
+    // Validate input
+    if (useOllama !== undefined && typeof useOllama !== 'boolean') {
+      return res.status(400).json({ error: 'Invalid useOllama value' });
+    }
+
+    // Update settings
+    if (useOllama !== undefined) llmSettings.useOllama = useOllama;
+    if (ollamaModel) llmSettings.ollamaModel = ollamaModel;
+    if (ollamaBaseUrl) llmSettings.ollamaBaseUrl = ollamaBaseUrl;
+    if (claudeModel) llmSettings.claudeModel = claudeModel;
+
+    console.log('🔄 LLM settings updated:', {
+      useOllama: llmSettings.useOllama,
+      model: llmSettings.useOllama ? llmSettings.ollamaModel : llmSettings.claudeModel
+    });
+
+    res.json({ success: true, settings: llmSettings });
+  } catch (error) {
+    console.error('Error updating LLM settings:', error);
+    res.status(500).json({ error: 'Failed to update settings', details: error.message });
   }
 });
 
@@ -896,7 +1126,7 @@ const isMainModule = process.argv[1] &&
 if (!isVercel && isMainModule) {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
-    console.log(`Access from network at http://10.88.111.20:${PORT}`);
+    console.log(`Access from network at http://10.88.111.48:${PORT}`);
   });
 }
 

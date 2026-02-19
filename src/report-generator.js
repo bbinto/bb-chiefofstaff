@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { PATHS, PRICING, REPORT, ENVIRONMENTAL_IMPACT } from './utils/constants.js';
 import { formatDateLocalISO, formatTimeLocal } from './utils/date-utils.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const projectRoot = path.join(__dirname, '..');
 
 /**
  * Report Generator
@@ -9,7 +14,12 @@ import { formatDateLocalISO, formatTimeLocal } from './utils/date-utils.js';
  */
 export class ReportGenerator {
   constructor() {
-    this.reportDir = path.join(process.cwd(), PATHS.REPORTS_DIR);
+    // Use absolute path from module location, not process.cwd()
+    // This ensures reports directory is found regardless of where the script is called from
+    this.reportDir = path.join(projectRoot, PATHS.REPORTS_DIR);
+    console.log(`[ReportGenerator] Reports directory: ${this.reportDir}`);
+    console.log(`[ReportGenerator] Module location: ${__dirname}`);
+    console.log(`[ReportGenerator] Current working directory: ${process.cwd()}`);
     this.ensureReportDir();
   }
 
@@ -17,8 +27,17 @@ export class ReportGenerator {
    * Ensure reports directory exists
    */
   ensureReportDir() {
-    if (!fs.existsSync(this.reportDir)) {
-      fs.mkdirSync(this.reportDir, { recursive: true });
+    try {
+      if (!fs.existsSync(this.reportDir)) {
+        console.log(`[ReportGenerator] Creating reports directory: ${this.reportDir}`);
+        fs.mkdirSync(this.reportDir, { recursive: true });
+        console.log(`[ReportGenerator] Reports directory created successfully`);
+      } else {
+        console.log(`[ReportGenerator] Reports directory exists: ${this.reportDir}`);
+      }
+    } catch (error) {
+      console.error(`[ReportGenerator] Error creating reports directory: ${error.message}`);
+      throw error;
     }
   }
 
@@ -53,11 +72,28 @@ export class ReportGenerator {
    * Save report as Markdown
    */
   saveAsMarkdown(report, dateStr, timeStr, reportName = 'weekly-report') {
-    const filename = `${reportName}-${dateStr}-${timeStr}.md`;
-    const filepath = path.join(this.reportDir, filename);
-    fs.writeFileSync(filepath, report, 'utf8');
-    console.log(`\nReport saved to: ${filepath}`);
-    return filepath;
+    try {
+      const filename = `${reportName}-${dateStr}-${timeStr}.md`;
+      const filepath = path.join(this.reportDir, filename);
+      
+      console.log(`[ReportGenerator] Writing report to: ${filepath}`);
+      console.log(`[ReportGenerator] Report directory: ${this.reportDir}`);
+      console.log(`[ReportGenerator] Report size: ${report.length} bytes`);
+      
+      // Check if directory exists before writing
+      if (!fs.existsSync(this.reportDir)) {
+        console.error(`[ReportGenerator] Reports directory does not exist: ${this.reportDir}`);
+        throw new Error(`Reports directory not found: ${this.reportDir}`);
+      }
+      
+      fs.writeFileSync(filepath, report, 'utf8');
+      console.log(`\n✓ Report saved to: ${filepath}`);
+      return filepath;
+    } catch (error) {
+      console.error(`[ReportGenerator] Error saving report: ${error.message}`);
+      console.error(`[ReportGenerator] Stack trace:`, error.stack);
+      throw error;
+    }
   }
 
   /**

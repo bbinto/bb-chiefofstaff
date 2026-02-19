@@ -7,6 +7,7 @@ import AgentRunner from './components/AgentRunner'
 import Analytics from './components/Analytics'
 import ConfigViewer from './components/ConfigViewer'
 import MCPStatus from './components/MCPStatus'
+import Settings from './components/Settings'
 import mariLogo from './img/mari-128.png'
 
 // Get API URL from environment variable, fallback to relative URL (uses proxy)
@@ -27,6 +28,7 @@ function App() {
   const [showAnalytics, setShowAnalytics] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
   const [showMCPStatus, setShowMCPStatus] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
     // Check if password is stored in sessionStorage
@@ -286,6 +288,16 @@ function App() {
                 </svg>
                 <span className="font-medium text-sm">Analytics</span>
               </button>
+              <button
+                onClick={() => setShowSettings(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+                title="LLM Settings"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                </svg>
+                <span className="font-medium text-sm">Settings</span>
+              </button>
 
               <button
                 onClick={handleLogout}
@@ -303,7 +315,12 @@ function App() {
       </header>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        {showMCPStatus ? (
+        {showSettings ? (
+          <Settings
+            password={password}
+            onBack={() => setShowSettings(false)}
+          />
+        ) : showMCPStatus ? (
           <MCPStatus
             password={password}
             onBack={() => setShowMCPStatus(false)}

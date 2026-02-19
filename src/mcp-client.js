@@ -87,8 +87,45 @@ export class MCPClientManager {
    * Load MCP configuration from Claude Desktop config
    */
   loadMCPConfig() {
-    const configPath = process.env.MCP_CONFIG_PATH ||
-      path.join(os.homedir(), 'Library/Application Support/Claude/claude_desktop_config.json');
+    // Determine the correct path based on the platform
+    let configPath = process.env.MCP_CONFIG_PATH;
+    
+    if (!configPath) {
+      const platform = process.platform;
+      const homeDir = os.homedir();
+      
+      if (platform === 'darwin') {
+        // macOS
+        configPath = path.join(homeDir, 'Library/Application Support/Claude/claude_desktop_config.json');
+      } else if (platform === 'linux') {
+        // Linux - try both .config/Claude and .config/claude
+        const linuxPaths = [
+          path.join(homeDir, '.config/Claude/claude_desktop_config.json'),
+          path.join(homeDir, '.config/claude/claude_desktop_config.json')
+        ];
+        for (const p of linuxPaths) {
+          if (fs.existsSync(p)) {
+            configPath = p;
+            break;
+          }
+        }
+        // If neither exists, default to the first one
+        if (!configPath) {
+          configPath = linuxPaths[0];
+        }
+      } else if (platform === 'win32') {
+        // Windows
+        const appData = process.env.APPDATA;
+        if (appData) {
+          configPath = path.join(appData, 'Claude/claude_desktop_config.json');
+        } else {
+          configPath = path.join(homeDir, 'AppData/Roaming/Claude/claude_desktop_config.json');
+        }
+      } else {
+        // Fallback for other platforms
+        configPath = path.join(homeDir, '.config/Claude/claude_desktop_config.json');
+      }
+    }
 
     try {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));

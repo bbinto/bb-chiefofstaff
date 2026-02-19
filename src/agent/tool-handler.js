@@ -80,6 +80,16 @@ export class ToolHandler {
           },
           required: ['filename']
         }
+      },
+      {
+        name: 'get_current_time',
+        description:
+          'Get the current date and time. Returns the current date, time, timestamp, Unix timestamp, and timezone information in multiple formats.',
+        input_schema: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
       }
     );
 
@@ -109,7 +119,32 @@ export class ToolHandler {
       return this.readReportFile(args);
     }
 
+    if (toolName === 'get_current_time') {
+      return this.getCurrentTime();
+    }
+
     throw new Error(`Unknown custom tool: ${toolName}`);
+  }
+
+  /**
+   * Get current date and time
+   * @returns {object} Current date/time info
+   */
+  getCurrentTime() {
+    const now = new Date();
+    const isoString = now.toISOString();
+    const dateOnly = isoString.split('T')[0]; // YYYY-MM-DD
+    const timeOnly = isoString.split('T')[1]; // HH:mm:ss.sssZ
+
+    return {
+      timestamp: isoString,
+      date: dateOnly,
+      time: timeOnly,
+      isoFormat: isoString,
+      unixTimestamp: Math.floor(now.getTime() / 1000),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      message: `Current date and time: ${dateOnly} at ${now.toLocaleTimeString()}`
+    };
   }
 
   /**

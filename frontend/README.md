@@ -64,6 +64,47 @@ The Express server provides:
 - `GET /api/reports/:filename` - Get specific report content
 - `GET /api/agents` - Get list of unique agent names
 
+## Podcast (md2podcast) configuration
+
+The dashboard can trigger a local `md2podcast` script to convert any generated Markdown report into an MP3. Configure either:
+
+- Environment variable: `MD2PODCAST_PATH` (path to executable or Python script)
+- Or add `md2podcastPath` to the project's `config.json` at repository root.
+
+Defaults: the server uses `edge` as the default engine and default voice/rate values if not provided.
+You can override defaults via environment variables:
+
+- `MD2PODCAST_ENGINE` (default: `edge`)
+- `MD2PODCAST_VOICE` (default: empty)
+- `MD2PODCAST_RATE` (default: `1.0`)
+
+Or set these in `config.json` as `md2podcastEngine`, `md2podcastVoice`, and `md2podcastRate`.
+
+Example (start server with env var):
+```bash
+export OPENAI_API_KEY="sk_xxx"
+export MD2PODCAST_PATH="/home/pi/Documents/GitHub/md-to-podcast/md2podcast.py"
+node frontend/server.js
+```
+
+Once configured, open a report in the UI and click **Create Podcast**. The server will run the configured script and place the MP3 next to the report in `reports/`. You can also trigger conversion via the API:
+
+```bash
+curl -X POST "http://localhost:3001/api/reports/<REPORT_FILENAME>/podcast" \
+	-H 'Content-Type: application/json' \
+	-d '{"engine":"edge","voice":"","rate":1.0}'
+```
+
+The endpoint returns an `executionId` you can use to poll `/api/execution/:executionId` for logs/status, and then download the MP3 at:
+
+```
+GET /api/reports/<REPORT_FILENAME>/podcast
+```
+
+Notes:
+- Ensure any external TTS provider credentials (e.g., `OPENAI_API_KEY` for OpenAI) are set in the environment where `frontend/server.js` runs.
+- The server validates filenames to prevent path traversal and runs the configured script with controlled arguments only.
+
 ## Building for Production
 
 ```bash

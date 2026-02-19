@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
 import { RateLimiter } from './agent/rate-limiter.js';
@@ -27,10 +28,28 @@ export class AgentRunner {
     this.config = config;
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
     this.agentParams = agentParams; // { slackUserId: 'U...', folder: 'week1', etc. }
-    this.anthropic = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY
-    });
-    this.model = process.env.CLAUDE_MODEL || API_DEFAULTS.MODEL;
+    
+    // Detect if using Ollama or Anthropic
+    this.useOllama = process.env.USE_OLLAMA === 'true';
+    
+    if (this.useOllama) {
+      console.log('🦙 Using local Ollama LLM');
+      const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+      this.anthropic = new OpenAI({
+        apiKey: 'dummy-key', // Ollama doesn't require a real key
+        baseURL: ollamaBaseUrl
+      });
+      this.model = process.env.OLLAMA_MODEL || 'mistral';
+      console.log(`  Model: ${this.model}`);
+      console.log(`  Base URL: ${ollamaBaseUrl}`);
+    } else {
+      console.log('🔑 Using Anthropic Claude API');
+      this.anthropic = new Anthropic({
+        apiKey: process.env.ANTHROPIC_API_KEY
+      });
+      this.model = process.env.CLAUDE_MODEL || API_DEFAULTS.MODEL;
+      console.log(`  Model: ${this.model}`);
+    }
 
     // Initialize helper classes
     this.rateLimiter = new RateLimiter();
@@ -58,6 +77,59 @@ export class AgentRunner {
   }
 
   /**
+   * Convert Anthropic format to OpenAI format for Ollama
+   * Ollama uses OpenAI's chat.completion format
+   */
+  convertParamsForOllama(params) {
+    const converted = {
+      model: this.model,
+      messages: params.messages,
+      max_tokens: params.max_tokens || 8000,
+      temperature: params.temperature,
+    };
+    
+    // Note: Most Ollama models don't support function calling/tools
+    // If tools are provided, log a warning but don't include them
+    if (params.tools && params.tools.length > 0) {
+      console.log('⚠️  Warning: Ollama models have limited tool-calling support. Tools may not work as expected.');
+    }
+    
+    return converted;
+  }
+
+  /**
+   * Convert OpenAI response to Anthropic format for compatibility
+   */
+  convertResponseFromOllama(openaiResponse) {
+    // Convert OpenAI response format to Anthropic-compatible format
+    const content = [];
+    
+    if (openaiResponse.choices && openaiResponse.choices[0]) {
+      const choice = openaiResponse.choices[0];
+      if (choice.message && choice.message.content) {
+        content.push({
+          type: 'text',
+          text: choice.message.content
+        });
+      }
+    }
+    
+    return {
+      id: openaiResponse.id,
+      type: 'message',
+      role: 'assistant',
+      content: content,
+      model: openaiResponse.model,
+      stop_reason: openaiResponse.choices?.[0]?.finish_reason || 'end_turn',
+      stop_sequence: null,
+      usage: {
+        input_tokens: openaiResponse.usage?.prompt_tokens || 0,
+        output_tokens: openaiResponse.usage?.completion_tokens || 0
+      }
+    };
+  }
+
+  /**
    * Make API call with rate limiting and retry logic
    */
   async makeApiCall(params, retries = RETRY_CONFIG.MAX_RETRIES) {
@@ -73,7 +145,14 @@ export class AgentRunner {
       try {
         await this.rateLimiter.waitForRateLimit(estimatedTokens);
 
-        const response = await this.anthropic.messages.create(params);
+        let response;
+        if (this.useOllama) {
+          const ollamaParams = this.convertParamsForOllama(params);
+          const ollamaResponse = await this.anthropic.chat.completions.create(ollamaParams);
+          response = this.convertResponseFromOllama(ollamaResponse);
+        } else {
+          response = await this.anthropic.messages.create(params);
+        }
 
         // Track token usage (use actual input tokens from response)
         if (response.usage) {
@@ -770,20 +849,18 @@ export class AgentRunner {
     
     if (this.dateRange) {
       endDateISO = this.dateRange.endDate || todayISO;
-      
+      const endDateObj = new Date(endDateISO + 'T00:00:00');
+
       // If start date is not provided, default to configured days before end date
       if (this.dateRange.startDate) {
         startDateISO = this.dateRange.startDate;
       } else {
-        // Default start date to configured days before end date
-        const endDateObj = new Date(endDateISO + 'T00:00:00');
         const defaultDaysAgo = new Date(endDateObj);
         defaultDaysAgo.setDate(endDateObj.getDate() - defaultDays);
         startDateISO = defaultDaysAgo.toISOString().split('T')[0];
       }
-      
+
       // Calculate 3 days ago from end date
-      const endDateObj = new Date(endDateISO + 'T00:00:00');
       const threeDaysAgo = new Date(endDateObj);
       threeDaysAgo.setDate(endDateObj.getDate() - 3);
       threeDaysAgoISO = threeDaysAgo.toISOString().split('T')[0];
@@ -1118,14 +1195,6 @@ ${(() => {
         return server.includes('mixpanel');
       });
       console.log(`[buildToolsSchema] Filtered tools for mixpanel-query: Mixpanel-only, ${filteredTools.length}/${beforeCount} tools (reduces prompt size significantly)`);
-    }
-
-    // For telemetry-from-slack agent, exclude tools from "mixpanel-mcp" server
-    // Use only tools from "mixpanel" server for Mixpanel operations
-    if (agentName === 'telemetry-from-slack') {
-      filteredTools = filteredTools.filter(tool => tool.server !== 'mixpanel-mcp');
-      const mixpanelTools = filteredTools.filter(tool => tool.server === 'mixpanel');
-      console.log(`[buildToolsSchema] Filtered tools for telemetry-from-slack: excluded "mixpanel-mcp", ${mixpanelTools.length} tools from "mixpanel" server, ${filteredTools.length} total tools available`);
     }
 
     // For specific-network-telemetry agent, only include Mixpanel tools

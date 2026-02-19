@@ -374,6 +374,17 @@ function ReportViewer({ report, onBack, password }) {
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [utterance, setUtterance] = useState(null)
   const [anthropicUsage, setAnthropicUsage] = useState(null)
+  const [creatingPodcast, setCreatingPodcast] = useState(false)
+  const [podcastExecutionId, setPodcastExecutionId] = useState(null)
+  const [showPodcastModal, setShowPodcastModal] = useState(false)
+  const [podcastLogs, setPodcastLogs] = useState([])
+  const [podcastStatus, setPodcastStatus] = useState(null)
+  const sseRef = useRef(null)
+  const [hasPodcast, setHasPodcast] = useState(false)
+  // Defaults are intentionally not editable in the UI; server env/config can override
+  const [podcastEngine] = useState('edge')
+  const [podcastVoice] = useState('')
+  const [podcastRate] = useState(1.0)
 
   // Parse markdown content into sections
   const parseContentSections = (markdown) => {
@@ -464,6 +475,7 @@ function ReportViewer({ report, onBack, password }) {
     fetchReportContent()
     loadNotes()
     fetchAnthropicUsage()
+    checkPodcastExists()
     
     // Check if mermaid is available
     const checkMermaid = setInterval(() => {
@@ -491,6 +503,19 @@ function ReportViewer({ report, onBack, password }) {
       }
     }
   }, [report])
+
+  const checkPodcastExists = async () => {
+    try {
+      const headers = {}
+      if (password) headers['x-app-password'] = password
+      // Use HEAD to check existence without downloading
+      const resp = await fetch(`${API_URL}/api/reports/${encodeURIComponent(report.filename)}/podcast`, { method: 'HEAD', headers })
+      setHasPodcast(resp.ok)
+    } catch (err) {
+      console.error('Error checking podcast existence:', err)
+      setHasPodcast(false)
+    }
+  }
 
   const loadNotes = () => {
     try {
@@ -570,6 +595,156 @@ function ReportViewer({ report, onBack, password }) {
       alert('Failed to export to Slack format. Please try again.')
     }
   }
+
+  const handleCreatePodcast = async () => {
+    try {
+      if (creatingPodcast) return
+      setCreatingPodcast(true)
+
+      // Open modal immediately so users get feedback
+      setShowPodcastModal(true)
+      setPodcastStatus('starting')
+      setPodcastLogs(prev => [...prev, { type: 'info', message: 'Starting podcast conversion...', timestamp: new Date() }])
+
+      const headers = { 'Content-Type': 'application/json' }
+      if (password) headers['x-app-password'] = password
+
+      const resp = await fetch(`${API_URL}/api/reports/${encodeURIComponent(report.filename)}/podcast`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ engine: podcastEngine, voice: podcastVoice, rate: podcastRate })
+      })
+
+      if (!resp.ok) {
+        // Try to read JSON error response, otherwise text
+        let bodyText = null
+        try {
+          const json = await resp.json()
+          bodyText = json.error || JSON.stringify(json)
+        } catch (e) {
+          try { bodyText = await resp.text() } catch (e2) { bodyText = String(e2) }
+        }
+
+        const errMsg = `Server returned ${resp.status}: ${bodyText || resp.statusText}`
+        setPodcastLogs(prev => [...prev, { type: 'error', message: errMsg, timestamp: new Date() }])
+        setPodcastStatus('failed')
+        setCreatingPodcast(false)
+        return
+      }
+
+      const data = await resp.json()
+      const executionId = data.executionId
+      setPodcastExecutionId(executionId)
+      setPodcastLogs(prev => [...prev, { type: 'info', message: `Execution started: ${executionId}`, timestamp: new Date() }])
+      setPodcastStatus('running')
+
+      // Try Server-Sent Events for live logs; fall back to polling if not supported
+      try {
+        const sseUrl = `${API_URL}/api/execution/${executionId}/stream`
+        const es = new EventSource(sseUrl)
+        sseRef.current = es
+        es.onmessage = (e) => {
+          try {
+            const parsed = JSON.parse(e.data)
+            setPodcastLogs(prev => [...prev, parsed])
+            if (parsed.type === 'status') {
+              setPodcastStatus(parsed.status)
+              if (parsed.status !== 'running') {
+                setCreatingPodcast(false)
+                es.close()
+                if (parsed.status === 'completed') {
+                  const downloadUrl = `${API_URL}/api/reports/${encodeURIComponent(report.filename)}/podcast`
+                  window.open(downloadUrl, '_blank')
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Failed to parse SSE message', err)
+            setPodcastLogs(prev => [...prev, { type: 'stderr', message: e.data, timestamp: new Date() }])
+          }
+        }
+        es.onerror = (err) => {
+          console.error('SSE error, falling back to polling', err)
+          if (es) try { es.close() } catch (e) {}
+          // start polling fallback
+          startPollingFallback(executionId, headers, report.filename)
+        }
+      } catch (err) {
+        console.error('SSE failed, falling back to polling', err)
+        startPollingFallback(executionId, headers, report.filename)
+      }
+
+    } catch (err) {
+      console.error('Failed to create podcast:', err)
+      setPodcastLogs(prev => [...prev, { type: 'error', message: String(err.message || err), timestamp: new Date() }])
+      setPodcastStatus('failed')
+      setCreatingPodcast(false)
+    }
+  }
+
+  const startPollingFallback = (executionId, headers, filename) => {
+    const poll = setInterval(async () => {
+      try {
+        const statusResp = await fetch(`${API_URL}/api/execution/${executionId}`, { headers })
+        if (!statusResp.ok) return
+        const statusData = await statusResp.json()
+        // Merge any new logs
+        if (Array.isArray(statusData.logs)) {
+          setPodcastLogs(prev => [...prev, ...statusData.logs.slice(prev.length)])
+        }
+        if (statusData.status && statusData.status !== 'running') {
+          clearInterval(poll)
+          setCreatingPodcast(false)
+          setPodcastStatus(statusData.status)
+          if (statusData.status === 'completed' || statusData.exitCode === 0) {
+            const downloadUrl = `${API_URL}/api/reports/${encodeURIComponent(filename)}/podcast`
+            window.open(downloadUrl, '_blank')
+          } else {
+            alert('Podcast creation failed. Check server logs for details.')
+          }
+        }
+      } catch (err) {
+        console.error('Error polling podcast status (fallback):', err)
+      }
+    }, 1500)
+  }
+
+  const closePodcastModal = () => {
+    setShowPodcastModal(false)
+    setPodcastExecutionId(null)
+    setPodcastLogs([])
+    setPodcastStatus(null)
+    if (sseRef.current) {
+      try { sseRef.current.close() } catch (e) {}
+      sseRef.current = null
+    }
+  }
+
+  // When modal opens, fetch execution details (including command) if executionId exists
+  useEffect(() => {
+    if (!showPodcastModal || !podcastExecutionId) return
+
+    let cancelled = false
+    const fetchExecution = async () => {
+      try {
+        const headers = {}
+        if (password) headers['x-app-password'] = password
+        const resp = await fetch(`${API_URL}/api/execution/${podcastExecutionId}`, { headers })
+        if (!resp.ok) return
+        const data = await resp.json()
+        if (cancelled) return
+        if (data.command) setPodcastLogs(prev => [...prev, { type: 'info', message: `Command: ${data.command}`, timestamp: new Date() }])
+        if (Array.isArray(data.logs)) setPodcastLogs(prev => [...prev, ...data.logs])
+        if (data.status) setPodcastStatus(data.status)
+      } catch (err) {
+        console.error('Failed to fetch execution details:', err)
+      }
+    }
+
+    fetchExecution()
+
+    return () => { cancelled = true }
+  }, [showPodcastModal, podcastExecutionId])
 
   // Extract plain text from markdown content for speech synthesis
   const extractPlainText = (markdown) => {
@@ -756,7 +931,6 @@ function ReportViewer({ report, onBack, password }) {
       'product-engineering': 'from-[#00203F] to-teal-600',
       'okr-progress': 'from-teal-600 to-cyan-500',
       'release-tracker': 'from-indigo-600 to-purple-600',
-      'telemetry-from-slack': 'from-purple-500 to-teal-500',
       'telemetry-deepdive': 'from-purple-500 to-teal-500',
       'mixpanel-query': 'from-purple-500 to-teal-500',
       'feature-telemetry-tracking': 'from-purple-500 to-teal-500',
@@ -864,6 +1038,28 @@ function ReportViewer({ report, onBack, password }) {
                 <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
               </svg>
             </button>
+            <button
+              onClick={handleCreatePodcast}
+              disabled={creatingPodcast}
+              title={creatingPodcast ? 'Creating podcast...' : 'Create Podcast'}
+              className="flex items-center justify-center p-2 text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed ml-1"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 1a3 3 0 00-3 3v7a3 3 0 006 0V4a3 3 0 00-3-3zM5 10a7 7 0 0014 0h-2a5 5 0 01-10 0H5zm7 11a3 3 0 003-3h-6a3 3 0 003 3z" />
+              </svg>
+            </button>
+            {hasPodcast && (
+              <a
+                href={`${API_URL}/api/reports/${encodeURIComponent(report.filename)}/podcast`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Download MP3"
+                className="ml-2 inline-flex items-center gap-2 px-3 py-1 text-xs bg-emerald-600 text-white rounded"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3v10m0 0l-4-4m4 4l4-4M5 20h14v-2H5v2z"/></svg>
+                MP3
+              </a>
+            )}
             <button
               onClick={handleSpeech}
               disabled={typeof window === 'undefined' || !window.speechSynthesis}

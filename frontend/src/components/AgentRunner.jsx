@@ -7,12 +7,12 @@ function AgentRunner({ password, onClose }) {
   const [agents, setAgents] = useState([
     { name: 'prep-for-week', displayName: 'Prep for the Week', description: 'Prepare for upcoming week with todos, calendar, and 1-1 notes', lastRun: null },
     { name: 'daily-brief', displayName: 'Daily Brief', description: 'Super concise daily brief with top 2 items from news, Slack, and Jira from yesterday', lastRun: null },
+    { name: 'daily-onenote-todos', displayName: 'Daily OneNote Todos', description: 'Simple brief of unfinished todos from OneNote for the current week', lastRun: null },
     { name: 'weekly-recap', displayName: 'Weekly Recap', description: 'Weekly team catch-up and recap', lastRun: null },
     { name: 'business-health', displayName: 'Business Health', description: 'Officevibe business and product health', requiresParam: 'manualSourcesFolder', lastRun: null },
     { name: 'business-pulse', displayName: 'Business Pulse Brief', description: 'Officevibe business pulse', lastRun: null },
     { name: 'product-engineering', displayName: 'Product Engineering', description: 'Product development and engineering updates', lastRun: null },
     { name: 'telemetry-deepdive', displayName: 'Telemetry Deep Dive', description: 'Deep dive into telemetry data', requiresParam: 'folder', lastRun: null },
-    { name: 'telemetry-from-slack', displayName: 'Telemetry from Slack', description: 'Analyze Mixpanel updates from Slack telemetry channels (last 24 hours)', lastRun: null },
     { name: 'mixpanel-query', displayName: 'Mixpanel Query', description: 'Query Mixpanel analytics for retention, usage, and feature metrics', lastRun: null },
     { name: 'feature-telemetry-tracking', displayName: 'Feature Telemetry Tracking', description: 'Analyze one feature\'s Mixpanel telemetry vs overall MAU and adoption', requiresParam: 'feature', lastRun: null },
     { name: 'team-pulse', displayName: 'Team Pulse', description: 'Team engagement and pulse survey analysis', lastRun: null },
@@ -30,8 +30,8 @@ function AgentRunner({ password, onClose }) {
     { name: 'epp', displayName: 'Employee Personality Profile', description: 'Generate personality profile using Myers-Briggs and Insights frameworks', requiresParam: 'email', lastRun: null },
     { name: 'weekly-executive-summary', displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
     { name: 'good-vibes-recognition', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null },
-    { name: 'mydailyhealth', displayName: 'My Daily Health', description: 'Review yesterday\'s health information and today\'s predictions from Oura, Withings, and Strava', isPrivate: true, lastRun: null }
-     
+    { name: 'icp-inspector', displayName: 'ICP Inspector', description: 'Cross-check CRM companies (20–250 seats) with Gong calls and VoC; split by closed won/lost', lastRun: null },
+    
   ])
 
   const [selectedAgents, setSelectedAgents] = useState([])

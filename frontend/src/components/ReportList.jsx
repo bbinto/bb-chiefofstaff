@@ -56,7 +56,6 @@ function ReportList({ reports, onReportSelect }) {
       'product-engineering': 'from-teal-500 to-teal-500',
       'okr-progress': 'from-orange-500 to-teal-500',
       'release-tracker': 'from-indigo-500 to-purple-500',
-      'telemetry-from-slack': 'from-purple-500 to-teal-500',
       'telemetry-deepdive': 'from-purple-500 to-teal-500',
       'mixpanel-query': 'from-purple-500 to-teal-500',
       'feature-telemetry-tracking': 'from-purple-500 to-teal-500',
