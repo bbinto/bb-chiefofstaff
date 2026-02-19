@@ -375,6 +375,7 @@ function ReportViewer({ report, onBack, password }) {
   const [utterance, setUtterance] = useState(null)
   const [anthropicUsage, setAnthropicUsage] = useState(null)
   const [creatingPodcast, setCreatingPodcast] = useState(false)
+  const [creatingLightReport, setCreatingLightReport] = useState(false)
   const [podcastExecutionId, setPodcastExecutionId] = useState(null)
   const [showPodcastModal, setShowPodcastModal] = useState(false)
   const [podcastLogs, setPodcastLogs] = useState([])
@@ -679,6 +680,46 @@ function ReportViewer({ report, onBack, password }) {
       setPodcastLogs(prev => [...prev, { type: 'error', message: String(err.message || err), timestamp: new Date() }])
       setPodcastStatus('failed')
       setCreatingPodcast(false)
+    }
+  }
+
+  const handleCreateLightReport = async () => {
+    if (creatingLightReport) return
+
+    try {
+      setCreatingLightReport(true)
+
+      const headers = {}
+      if (password) headers['x-app-password'] = password
+
+      const response = await fetch(`${API_URL}/api/reports/${encodeURIComponent(report.filename)}/light`, {
+        method: 'POST',
+        headers
+      })
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to create light report'
+        try {
+          const data = await response.json()
+          errorMessage = data?.details || data?.error || errorMessage
+        } catch {
+          const text = await response.text()
+          if (text) errorMessage = text
+        }
+        throw new Error(errorMessage)
+      }
+
+      const data = await response.json()
+      if (!data?.filename) {
+        throw new Error('Light report was created but no filename was returned')
+      }
+
+      window.location.assign(`/${encodeURIComponent(data.filename)}`)
+    } catch (err) {
+      console.error('Failed to create light report:', err)
+      alert(`Failed to create light report: ${err.message}`)
+    } finally {
+      setCreatingLightReport(false)
     }
   }
 
@@ -1046,6 +1087,16 @@ function ReportViewer({ report, onBack, password }) {
             >
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 1a3 3 0 00-3 3v7a3 3 0 006 0V4a3 3 0 00-3-3zM5 10a7 7 0 0014 0h-2a5 5 0 01-10 0H5zm7 11a3 3 0 003-3h-6a3 3 0 003 3z" />
+              </svg>
+            </button>
+            <button
+              onClick={handleCreateLightReport}
+              disabled={creatingLightReport}
+              title={creatingLightReport ? 'Creating light report...' : 'Create Light Report'}
+              className="flex items-center justify-center p-2 text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 3v4a1 1 0 001 1h4M8 13h8M8 17h5M7 21h10a2 2 0 002-2V7.5L14.5 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
             </button>
             {hasPodcast && (

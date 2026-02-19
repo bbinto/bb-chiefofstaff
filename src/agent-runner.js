@@ -605,7 +605,8 @@ export class AgentRunner {
             if (toolUse.name === 'read_file_from_manual_sources' ||
                 toolUse.name === 'list_manual_sources_files' ||
                 toolUse.name === 'list_reports_in_week' ||
-                toolUse.name === 'read_report_file') {
+                toolUse.name === 'read_report_file' ||
+                toolUse.name === 'get_current_time') {
               toolResult = await this.handleCustomTool(toolUse.name, toolUse.input);
             } else {
               // Use MCP client for other tools

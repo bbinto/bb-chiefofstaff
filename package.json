@@ -9,6 +9,7 @@
     "test-mcp": "node test-mcp.js",
     "test-mixpanel": "node test-mixpanel-mcp.js",
     "fix-mixpanel": "node fix-mixpanel-mcp-config.js",
+    "light": "bash ./light.sh",
     "list": "node src/index.js --list",
     "help": "node src/index.js --help"
   },

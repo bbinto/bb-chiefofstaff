@@ -9,11 +9,53 @@ import { FRONTEND, PATHS } from '../src/utils/constants.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function loadEnvFileIntoProcess(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split(/\r?\n/);
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const cleanedLine = line.startsWith('export ') ? line.slice(7).trim() : line;
+    const equalIndex = cleanedLine.indexOf('=');
+    if (equalIndex <= 0) {
+      continue;
+    }
+
+    const key = cleanedLine.slice(0, equalIndex).trim();
+    if (!key || process.env[key] !== undefined) {
+      continue;
+    }
+
+    let value = cleanedLine.slice(equalIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
+
+// Ensure environment variables are loaded for local server usage.
+loadEnvFileIntoProcess(path.join(__dirname, '..', '.env'));
+loadEnvFileIntoProcess(path.join(__dirname, '.env'));
+
 const app = express();
 const PORT = FRONTEND.PORT;
 
 // Password protection configuration
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
 
 // LLM Settings - stored in memory (defaults from environment)
 let llmSettings = {
@@ -22,6 +64,169 @@ let llmSettings = {
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
   claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929'
 };
+
+function buildLightReportPrompt(filename, reportContent) {
+  return [
+    'You are an executive communications assistant and podcast script writer.',
+    'Create a LIGHT version of the provided report in markdown that sounds natural when read aloud by a text-to-speech engine.',
+    'Focus only on the most important information for executives.',
+    '',
+    'STRICT REQUIREMENTS:',
+    '- Remove token usage, environmental impact, cost, execution metadata, and other operational telemetry.',
+    '- Start directly with key business content (no preamble).',
+    '- Keep it concise, actionable, and easy to scan.',
+    '- Make it TTS-friendly: short sentences, natural punctuation, no emojis, no code blocks, no tables, no raw URLs.',
+    '- Expand uncommon abbreviations on first use when possible and avoid symbol-heavy text.',
+    '- Write in spoken language suitable for a podcast host. Avoid robotic or overly formal phrasing.',
+    '- Use brief transition lines between sections (for example: "Next, the key insights." or "Now, the actions.").',
+    '- Prefer short narration paragraphs and simple numbered actions over dense bullet lists.',
+    '- Keep each section tight: typically 2 to 5 short lines.',
+    '- Include these sections in this order:',
+    '  1) ## One-Line Executive Summary',
+    '  2) ## Most Important Insights',
+    '  3) ## Actions to Take',
+    '  4) ## Risks / Watchouts (if applicable)',
+    '- For "Actions to Take", use numbered items with clear owner-oriented wording.',
+    '- Preserve concrete facts/dates/metrics from the original report when present.',
+    '- Return markdown only.',
+    '',
+    `Original filename: ${filename}`,
+    '',
+    'Original report markdown:',
+    reportContent
+  ].join('\n');
+}
+
+function sanitizeLightReportForTTS(markdown) {
+  if (!markdown || typeof markdown !== 'string') {
+    return '';
+  }
+
+  return markdown
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function extractAnthropicText(data) {
+  if (!data || !Array.isArray(data.content)) {
+    return '';
+  }
+  return data.content
+    .filter((item) => item && item.type === 'text' && typeof item.text === 'string')
+    .map((item) => item.text)
+    .join('\n')
+    .trim();
+}
+
+function extractOllamaText(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  return typeof content === 'string' ? content.trim() : '';
+}
+
+function buildOllamaChatUrl(baseUrl) {
+  const trimmed = String(baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+  return trimmed.endsWith('/v1') ? `${trimmed}/chat/completions` : `${trimmed}/v1/chat/completions`;
+}
+
+async function generateLightReportWithClaude(promptText) {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is not set. Configure Claude API key or switch to Ollama in Settings.');
+  }
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': ANTHROPIC_API_KEY
+    },
+    body: JSON.stringify({
+      model: llmSettings.claudeModel || 'claude-sonnet-4-5-20250929',
+      max_tokens: 3000,
+      temperature: 0.2,
+      messages: [{ role: 'user', content: promptText }]
+    })
+  });
+
+  const responseText = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const err = data?.error?.message || responseText || `Claude request failed with status ${response.status}`;
+    throw new Error(err);
+  }
+
+  const markdown = extractAnthropicText(data);
+  if (!markdown) {
+    throw new Error('Claude returned an empty light report.');
+  }
+
+  return markdown;
+}
+
+async function generateLightReportWithOllama(promptText) {
+  const endpoint = buildOllamaChatUrl(llmSettings.ollamaBaseUrl);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: llmSettings.ollamaModel || 'mistral',
+      temperature: 0.2,
+      messages: [{ role: 'user', content: promptText }]
+    })
+  });
+
+  const responseText = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const err = data?.error?.message || data?.error || responseText || `Ollama request failed with status ${response.status}`;
+    throw new Error(err);
+  }
+
+  const markdown = extractOllamaText(data);
+  if (!markdown) {
+    throw new Error('Ollama returned an empty light report.');
+  }
+
+  return markdown;
+}
+
+async function generateLightReportMarkdown(filename, reportContent) {
+  const promptText = buildLightReportPrompt(filename, reportContent);
+  if (llmSettings.useOllama) {
+    return generateLightReportWithOllama(promptText);
+  }
+
+  if (ANTHROPIC_API_KEY) {
+    return generateLightReportWithClaude(promptText);
+  }
+
+  try {
+    console.warn('ANTHROPIC_API_KEY not set. Falling back to Ollama for light report generation.');
+    return await generateLightReportWithOllama(promptText);
+  } catch (ollamaError) {
+    throw new Error(`ANTHROPIC_API_KEY is not set and Ollama fallback failed: ${ollamaError.message}`);
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -310,6 +515,52 @@ app.get('/api/reports/:filename', (req, res) => {
   }
 });
 
+// Create a light version of a report using AI and save it to reports folder
+app.post('/api/reports/:filename/light', async (req, res) => {
+  try {
+    const filename = req.params.filename;
+
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    if (!filename.toLowerCase().endsWith('.md')) {
+      return res.status(400).json({ error: 'Only markdown reports can be lightened' });
+    }
+
+    const sourcePath = path.join(REPORTS_DIR, filename);
+    if (!fs.existsSync(sourcePath)) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
+    const lightContentRaw = await generateLightReportMarkdown(filename, sourceContent);
+    const lightContent = sanitizeLightReportForTTS(lightContentRaw);
+
+    if (!lightContent) {
+      throw new Error('Generated light report is empty after TTS cleanup');
+    }
+
+    const sourceBaseName = path.parse(filename).name;
+    const targetBaseName = sourceBaseName.endsWith('-light') ? sourceBaseName : `${sourceBaseName}-light`;
+    const targetFilename = `${targetBaseName}.md`;
+    const targetPath = path.join(REPORTS_DIR, targetFilename);
+
+    fs.writeFileSync(targetPath, lightContent.trim() + '\n', 'utf-8');
+
+    console.log('Light report created:', targetPath);
+    res.json({
+      success: true,
+      message: 'Light report created successfully',
+      filename: targetFilename,
+      path: targetPath
+    });
+  } catch (error) {
+    console.error('Error creating light report:', error);
+    res.status(500).json({ error: 'Failed to create light report', details: error.message });
+  }
+});
+
 // Delete a specific report
 app.delete('/api/reports/:filename', (req, res) => {
   try {
@@ -329,10 +580,43 @@ app.delete('/api/reports/:filename', (req, res) => {
       return res.status(404).json({ error: 'Report not found' });
     }
 
-    // Delete the file
+    // Delete the report file
     fs.unlinkSync(filePath);
     console.log('File deleted successfully:', filePath);
-    res.json({ success: true, message: 'Report deleted successfully' });
+
+    // Also delete the corresponding MP3 file if it exists (same folder as the report)
+    const baseName = path.parse(filename).name;
+    const normalizedExpectedMp3Name = `${baseName}.mp3`.normalize('NFC').toLowerCase();
+    const mp3Candidates = fs.readdirSync(REPORTS_DIR)
+      .filter((entry) => {
+        if (path.extname(entry).toLowerCase() !== '.mp3') {
+          return false;
+        }
+        return entry.normalize('NFC').toLowerCase() === normalizedExpectedMp3Name;
+      })
+      .map((entry) => path.join(REPORTS_DIR, entry));
+
+    const deletedMp3Files = [];
+    for (const mp3Path of mp3Candidates) {
+      try {
+        fs.unlinkSync(mp3Path);
+        deletedMp3Files.push(mp3Path);
+        console.log('MP3 file deleted successfully:', mp3Path);
+      } catch (mp3Error) {
+        console.warn('Warning: Could not delete MP3 file:', mp3Path, mp3Error.message);
+      }
+    }
+
+    if (deletedMp3Files.length === 0) {
+      const expectedMp3Path = path.join(REPORTS_DIR, `${baseName}.mp3`);
+      console.log('No corresponding MP3 file found:', expectedMp3Path);
+    }
+
+    res.json({
+      success: true,
+      message: 'Report deleted successfully',
+      deletedAudioFiles: deletedMp3Files.map(file => path.basename(file))
+    });
   } catch (error) {
     console.error('Error deleting report:', error);
     res.status(500).json({ error: 'Failed to delete report', details: error.message });
@@ -890,40 +1174,71 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Send existing logs
+  console.log(`[SSE] Client connected for execution ${executionId}`);
+
+  // Send existing logs immediately
+  console.log(`[SSE] Sending ${execution.logs.length} existing logs`);
   execution.logs.forEach(log => {
-    res.write(`data: ${JSON.stringify(log)}\n\n`);
+    const logData = `data: ${JSON.stringify(log)}\n\n`;
+    res.write(logData);
   });
+  res.flush?.();
 
+  // Track if response is still open
+  let isOpen = true;
+  
   // Set up interval to check for new logs
   let lastLogIndex = execution.logs.length;
   const interval = setInterval(() => {
+    if (!isOpen) {
+      clearInterval(interval);
+      return;
+    }
+    
     const currentExecution = activeExecutions.get(executionId);
     if (!currentExecution) {
+      console.log(`[SSE] Execution ${executionId} no longer found`);
       clearInterval(interval);
-      res.end();
+      try { res.end(); } catch (e) {}
+      isOpen = false;
       return;
     }
 
     // Send new logs
     if (currentExecution.logs.length > lastLogIndex) {
+      console.log(`[SSE] Sending ${currentExecution.logs.length - lastLogIndex} new logs`);
       for (let i = lastLogIndex; i < currentExecution.logs.length; i++) {
-        res.write(`data: ${JSON.stringify(currentExecution.logs[i])}\n\n`);
+        const logData = `data: ${JSON.stringify(currentExecution.logs[i])}\n\n`;
+        res.write(logData);
       }
+      res.flush?.();
       lastLogIndex = currentExecution.logs.length;
     }
 
-    // Send status update
+    // Send status update when complete
     if (currentExecution.status !== 'running') {
-      res.write(`data: ${JSON.stringify({ type: 'status', status: currentExecution.status, exitCode: currentExecution.exitCode })}\n\n`);
+      console.log(`[SSE] Sending final status: ${currentExecution.status}`);
+      const statusData = `data: ${JSON.stringify({ type: 'status', status: currentExecution.status, exitCode: currentExecution.exitCode })}\n\n`;
+      res.write(statusData);
+      res.flush?.();
       clearInterval(interval);
-      res.end();
+      try { res.end(); } catch (e) {}
+      isOpen = false;
     }
-  }, 1000);
+  }, 500);
 
   // Clean up on client disconnect
   req.on('close', () => {
+    console.log(`[SSE] Client disconnected from execution ${executionId}`);
+    isOpen = false;
+    clearInterval(interval);
+  });
+  
+  req.on('error', (err) => {
+    console.log(`[SSE] Error on execution ${executionId}:`, err.message);
+    isOpen = false;
     clearInterval(interval);
   });
 });

@@ -7,7 +7,6 @@ function AgentRunner({ password, onClose }) {
   const [agents, setAgents] = useState([
     { name: 'prep-for-week', displayName: 'Prep for the Week', description: 'Prepare for upcoming week with todos, calendar, and 1-1 notes', lastRun: null },
     { name: 'daily-brief', displayName: 'Daily Brief', description: 'Super concise daily brief with top 2 items from news, Slack, and Jira from yesterday', lastRun: null },
-    { name: 'daily-onenote-todos', displayName: 'Daily OneNote Todos', description: 'Simple brief of unfinished todos from OneNote for the current week', lastRun: null },
     { name: 'weekly-recap', displayName: 'Weekly Recap', description: 'Weekly team catch-up and recap', lastRun: null },
     { name: 'business-health', displayName: 'Business Health', description: 'Officevibe business and product health', requiresParam: 'manualSourcesFolder', lastRun: null },
     { name: 'business-pulse', displayName: 'Business Pulse Brief', description: 'Officevibe business pulse', lastRun: null },
@@ -16,7 +15,6 @@ function AgentRunner({ password, onClose }) {
     { name: 'mixpanel-query', displayName: 'Mixpanel Query', description: 'Query Mixpanel analytics for retention, usage, and feature metrics', lastRun: null },
     { name: 'feature-telemetry-tracking', displayName: 'Feature Telemetry Tracking', description: 'Analyze one feature\'s Mixpanel telemetry vs overall MAU and adoption', requiresParam: 'feature', lastRun: null },
     { name: 'team-pulse', displayName: 'Team Pulse', description: 'Team engagement and pulse survey analysis', lastRun: null },
-    { name: 'pingboard-migration', displayName: 'Pingboard Migration', description: 'Pingboard migration status', lastRun: null },
     { name: 'jira-tracker', displayName: 'Jira Tracker', description: 'Track Jira issues and progress', lastRun: null },
     { name: 'okr-progress', displayName: 'OKR Progress', description: 'OKR updates and progress tracking', lastRun: null },
     { name: 'productivity-weekly-tracker', displayName: 'Productivity Tracker', description: 'Weekly productivity tracking', lastRun: null },
@@ -25,8 +23,8 @@ function AgentRunner({ password, onClose }) {
     { name: 'performance-review-q3', displayName: 'Q3 Performance Review (WL)', description: 'Generate Q3 performance review using Workleap questionnaire format', requiresParam: 'email', lastRun: null },
     { name: 'thoughtleadership-updates', displayName: 'Thought Leadership', description: 'Product thought leadership and new topics', lastRun: null },
     { name: 'officevibe-strategy-roadmap', displayName: 'Officevibe Strategy Roadmap', description: 'Strategy roadmap for Officevibe', lastRun: null },
-    { name: 'slack-user-analysis', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', lastRun: null },
-    { name: '1-1', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', lastRun: null },
+    { name: 'slack-user-analysis', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', paramType: 'slackUserTeam', lastRun: null },
+    { name: '1-1', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', paramType: 'oneOnOne', lastRun: null },
     { name: 'epp', displayName: 'Employee Personality Profile', description: 'Generate personality profile using Myers-Briggs and Insights frameworks', requiresParam: 'email', lastRun: null },
     { name: 'weekly-executive-summary', displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
     { name: 'good-vibes-recognition', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null },
@@ -48,6 +46,8 @@ function AgentRunner({ password, onClose }) {
     feature: ''
   })
   const [releases, setReleases] = useState({}) // config.releases for feature dropdown
+  const [teamMembers, setTeamMembers] = useState([]) // team members for slack user analysis
+  const [oneOnOnes, setOneOnOnes] = useState([]) // 1-1s for 1-1 prep
   const [isRunning, setIsRunning] = useState(false)
   const [executionStatus, setExecutionStatus] = useState(null)
   const [executionLogs, setExecutionLogs] = useState([])
@@ -62,20 +62,22 @@ function AgentRunner({ password, onClose }) {
     }
   }, [executionLogs])
 
-  // Fetch config.releases when feature-telemetry-tracking is available (for feature dropdown)
+  // Fetch config data (releases, team members, 1-1s)
   useEffect(() => {
-    const fetchReleases = async () => {
+    const fetchConfigData = async () => {
       try {
         const headers = password ? { 'x-app-password': password } : {}
         const response = await fetch(`${API_URL}/api/config`, { headers })
         if (!response.ok) return
         const config = await response.json()
         setReleases(config.releases || {})
+        setTeamMembers(config.team?.ovTeamMembers || [])
+        setOneOnOnes(config.team?.['1-1s'] || [])
       } catch (err) {
-        console.error('Error fetching config for releases:', err)
+        console.error('Error fetching config:', err)
       }
     }
-    fetchReleases()
+    fetchConfigData()
   }, [password])
 
   // Fetch last run timestamps for each agent
@@ -208,13 +210,16 @@ function AgentRunner({ password, onClose }) {
       setExecutionLogs(prev => [...prev, `Process started with PID: ${result.pid}`])
 
       // Connect to Server-Sent Events stream for real-time logs
+      console.log(`Connecting to SSE stream: ${API_URL}/api/execution/${result.executionId}/stream`)
       const eventSource = new EventSource(`${API_URL}/api/execution/${result.executionId}/stream`)
 
       eventSource.onmessage = (event) => {
         try {
+          console.log('Received SSE message:', event.data)
           const data = JSON.parse(event.data)
 
           if (data.type === 'status') {
+            console.log('Status update:', data.status)
             setExecutionStatus(data.status)
             if (data.status === 'completed') {
               setExecutionLogs(prev => [...prev, '✓ Execution completed successfully!'])
@@ -230,13 +235,18 @@ function AgentRunner({ password, onClose }) {
               eventSource.close()
             }
           } else if (data.type === 'stdout' || data.type === 'stderr') {
-            // Filter out empty lines and add log
+            // Split multi-line messages into individual log entries
             const message = data.message.trim()
             if (message) {
-              setExecutionLogs(prev => [...prev, message])
+              const lines = message.split('\n')
+              console.log(`Received ${lines.length} log lines`)
+              setExecutionLogs(prev => [...prev, ...lines.filter(line => line.trim())])
             }
           } else if (data.type === 'error') {
-            setExecutionLogs(prev => [...prev, `ERROR: ${data.message}`])
+            // Split error messages into individual lines
+            const errorLines = data.message.split('\n').filter(line => line.trim())
+            console.log('Error logs:', errorLines)
+            setExecutionLogs(prev => [...prev, ...errorLines.map(line => `ERROR: ${line}`)])
             setDetailedError(data.message)
           }
         } catch (err) {
@@ -246,8 +256,11 @@ function AgentRunner({ password, onClose }) {
 
       eventSource.onerror = (error) => {
         console.error('SSE Error:', error)
-        eventSource.close()
-        // Don't set error status here - the stream might just be ending normally
+        console.log('EventSource state:', eventSource.readyState)
+        // Only close if not already closed
+        if (eventSource.readyState !== EventSource.CLOSED) {
+          eventSource.close()
+        }
       }
 
     } catch (error) {
@@ -384,10 +397,12 @@ function AgentRunner({ password, onClose }) {
                 {selectedAgentsRequiringParams.map(agent => (
                   <div key={agent.requiresParam} className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                     <label className="block text-sm font-medium text-gray-900 mb-1">
-                      {agent.requiresParam === 'slackUserId' && 'Slack User ID'}
+                      {agent.paramType === 'slackUserTeam' && 'Select Team Member'}
+                      {agent.paramType === 'oneOnOne' && 'Select Person for 1-1'}
+                      {agent.requiresParam === 'slackUserId' && !agent.paramType && 'Slack User ID'}
                       {agent.requiresParam === 'manualSourcesFolder' && 'Manual Sources Folder'}
                       {agent.requiresParam === 'folder' && 'Folder'}
-                      {agent.requiresParam === 'email' && 'Email'}
+                      {agent.requiresParam === 'email' && !agent.paramType && 'Email'}
                       {agent.requiresParam === 'week' && 'Week'}
                       {agent.requiresParam === 'feature' && 'Feature (release)'}
                       <span className="text-orange-600 ml-1">*</span>
@@ -406,6 +421,34 @@ function AgentRunner({ password, onClose }) {
                         {Object.entries(releases).map(([key, r]) => (
                           <option key={key} value={key}>
                             {r.name || key} {r.telemetry ? '' : '(no telemetry)'}
+                          </option>
+                        ))}
+                      </select>
+                    ) : agent.paramType === 'slackUserTeam' ? (
+                      <select
+                        value={parameters.slackUserId}
+                        onChange={(e) => handleParameterChange('slackUserId', e.target.value)}
+                        disabled={isRunning}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white"
+                      >
+                        <option value="">Select a team member...</option>
+                        {teamMembers.map(member => (
+                          <option key={member.slackId} value={member.slackId}>
+                            {member.name} ({member.role})
+                          </option>
+                        ))}
+                      </select>
+                    ) : agent.paramType === 'oneOnOne' ? (
+                      <select
+                        value={parameters.email}
+                        onChange={(e) => handleParameterChange('email', e.target.value)}
+                        disabled={isRunning}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white"
+                      >
+                        <option value="">Select a person for 1-1...</option>
+                        {oneOnOnes.map(person => (
+                          <option key={person.email} value={person.email}>
+                            {person.name} ({person.role})
                           </option>
                         ))}
                       </select>
