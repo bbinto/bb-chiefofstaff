@@ -56,13 +56,16 @@ const PORT = FRONTEND.PORT;
 // Password protection configuration
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
 
 // LLM Settings - stored in memory (defaults from environment)
 let llmSettings = {
   useOllama: process.env.USE_OLLAMA === 'true',
+  useGemini: process.env.USE_GEMINI === 'true',
   ollamaModel: process.env.OLLAMA_MODEL || 'mistral',
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-  claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929'
+  claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash'
 };
 
 function buildLightReportPrompt(filename, reportContent) {
@@ -210,10 +213,57 @@ async function generateLightReportWithOllama(promptText) {
   return markdown;
 }
 
+async function generateLightReportWithGemini(promptText) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY is not set. Configure Gemini API key in your .env file.');
+  }
+
+  const model = llmSettings.geminiModel || 'gemini-2.0-flash';
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GEMINI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [{ role: 'user', content: promptText }]
+      })
+    }
+  );
+
+  const responseText = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const err = data?.error?.message || data?.error || responseText || `Gemini request failed with status ${response.status}`;
+    throw new Error(err);
+  }
+
+  const markdown = data?.choices?.[0]?.message?.content || '';
+  if (!markdown) {
+    throw new Error('Gemini returned an empty light report.');
+  }
+
+  return markdown;
+}
+
 async function generateLightReportMarkdown(filename, reportContent) {
   const promptText = buildLightReportPrompt(filename, reportContent);
   if (llmSettings.useOllama) {
     return generateLightReportWithOllama(promptText);
+  }
+
+  if (llmSettings.useGemini) {
+    return generateLightReportWithGemini(promptText);
   }
 
   if (ANTHROPIC_API_KEY) {
@@ -246,8 +296,13 @@ function passwordProtection(req, res, next) {
     return next();
   }
 
-  // Check for password in header
-  const providedPassword = req.headers['x-app-password'];
+  // Check for password in header first
+  let providedPassword = req.headers['x-app-password'];
+  
+  // Also check query parameter (for SSE which can't send headers)
+  if (!providedPassword) {
+    providedPassword = req.query.password;
+  }
 
   if (providedPassword === APP_PASSWORD) {
     return next();
@@ -623,6 +678,8 @@ app.delete('/api/reports/:filename', (req, res) => {
   }
 });
 
+
+
 // Create a podcast from a markdown report (starts conversion and returns executionId)
 app.post('/api/reports/:filename/podcast', async (req, res) => {
   try {
@@ -850,8 +907,8 @@ app.post('/api/run-agents', async (req, res) => {
 
     console.log('Received agent execution request:', { agents, dateRange, parameters });
 
-    // Build command arguments
-    const args = ['start', '--'];
+    // Build command arguments (for direct node invocation, not npm)
+    const args = [];
 
     // Add agent names
     agents.forEach(agent => args.push(agent));
@@ -898,23 +955,34 @@ app.post('/api/run-agents', async (req, res) => {
       }
     }
 
-    const commandStr = `npm ${args.join(' ')}`;
+    const commandStr = `node src/index.js ${args.join(' ')}`;
     console.log('Executing command:', commandStr);
     console.log('[Server] Args array:', JSON.stringify(args));
+
+    // Log active LLM backend at run time so it's always visible in the logs
+    const runBackend = llmSettings.useOllama ? 'Ollama' : llmSettings.useGemini ? 'Gemini' : 'Claude';
+    const runModel = llmSettings.useOllama ? llmSettings.ollamaModel : llmSettings.useGemini ? llmSettings.geminiModel : llmSettings.claudeModel;
+    const runIcon = llmSettings.useOllama ? '🦙' : llmSettings.useGemini ? '💎' : '🔑';
+    console.log(`${runIcon}  LLM backend for this run: ${runBackend} / ${runModel}`);
 
     // Execute the command with LLM settings as environment variables
     const { spawn } = await import('child_process');
     const env = {
       ...process.env,
       USE_OLLAMA: llmSettings.useOllama.toString(),
+      USE_GEMINI: llmSettings.useGemini.toString(),
       OLLAMA_MODEL: llmSettings.ollamaModel,
       OLLAMA_BASE_URL: llmSettings.ollamaBaseUrl,
-      CLAUDE_MODEL: llmSettings.claudeModel
+      CLAUDE_MODEL: llmSettings.claudeModel,
+      GEMINI_MODEL: llmSettings.geminiModel,
+      // Unbuffer output to ensure real-time logs
+      PYTHONUNBUFFERED: '1',
+      NODE_NO_READLINE: '1'
     };
 
-    const child = spawn('npm', args, {
+    // Run node directly instead of through npm to avoid buffering issues
+    const child = spawn('node', ['src/index.js', ...args], {
       cwd: path.join(__dirname, '..'),
-      shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       env
     });
@@ -936,7 +1004,6 @@ app.post('/api/run-agents', async (req, res) => {
     // Capture stdout
     child.stdout.on('data', (data) => {
       const log = data.toString();
-      console.log(log);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stdout', message: log, timestamp: new Date() });
@@ -946,7 +1013,6 @@ app.post('/api/run-agents', async (req, res) => {
     // Capture stderr
     child.stderr.on('data', (data) => {
       const log = data.toString();
-      console.error(log);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stderr', message: log, timestamp: new Date() });
@@ -1136,23 +1202,40 @@ app.get('/api/settings/llm', (req, res) => {
 // Update LLM settings
 app.put('/api/settings/llm', (req, res) => {
   try {
-    const { useOllama, ollamaModel, ollamaBaseUrl, claudeModel } = req.body;
+    const { useOllama, useGemini, ollamaModel, ollamaBaseUrl, claudeModel, geminiModel } = req.body;
 
     // Validate input
     if (useOllama !== undefined && typeof useOllama !== 'boolean') {
       return res.status(400).json({ error: 'Invalid useOllama value' });
     }
+    if (useGemini !== undefined && typeof useGemini !== 'boolean') {
+      return res.status(400).json({ error: 'Invalid useGemini value' });
+    }
+    // Ensure only one backend is active at a time
+    if (useOllama && useGemini) {
+      return res.status(400).json({ error: 'Cannot enable both Ollama and Gemini simultaneously' });
+    }
 
     // Update settings
     if (useOllama !== undefined) llmSettings.useOllama = useOllama;
+    if (useGemini !== undefined) llmSettings.useGemini = useGemini;
     if (ollamaModel) llmSettings.ollamaModel = ollamaModel;
     if (ollamaBaseUrl) llmSettings.ollamaBaseUrl = ollamaBaseUrl;
     if (claudeModel) llmSettings.claudeModel = claudeModel;
+    if (geminiModel) llmSettings.geminiModel = geminiModel;
 
-    console.log('🔄 LLM settings updated:', {
-      useOllama: llmSettings.useOllama,
-      model: llmSettings.useOllama ? llmSettings.ollamaModel : llmSettings.claudeModel
-    });
+    const activeBackend = llmSettings.useOllama ? 'Ollama' : llmSettings.useGemini ? 'Gemini' : 'Claude';
+    const activeModel = llmSettings.useOllama ? llmSettings.ollamaModel : llmSettings.useGemini ? llmSettings.geminiModel : llmSettings.claudeModel;
+    const icon = llmSettings.useOllama ? '🦙' : llmSettings.useGemini ? '💎' : '🔑';
+    const ts = new Date().toISOString();
+    console.log('');
+    console.log('═'.repeat(60));
+    console.log(`${icon}  LLM BACKEND CHANGED  [${ts}]`);
+    console.log(`   Backend : ${activeBackend}`);
+    console.log(`   Model   : ${activeModel}`);
+    if (llmSettings.useOllama) console.log(`   URL     : ${llmSettings.ollamaBaseUrl}`);
+    console.log('═'.repeat(60));
+    console.log('');
 
     res.json({ success: true, settings: llmSettings });
   } catch (error) {
@@ -1164,6 +1247,13 @@ app.put('/api/settings/llm', (req, res) => {
 // Server-Sent Events endpoint for real-time progress
 app.get('/api/execution/:executionId/stream', (req, res) => {
   const { executionId } = req.params;
+  const { password } = req.query;
+  
+  // Check password if APP_PASSWORD is set
+  if (APP_PASSWORD && (!password || password !== APP_PASSWORD)) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid password' });
+  }
+  
   const execution = activeExecutions.get(executionId);
 
   if (!execution) {
@@ -1191,6 +1281,8 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
   
   // Set up interval to check for new logs
   let lastLogIndex = execution.logs.length;
+  console.log(`[SSE-INIT] Client connected, ${lastLogIndex} existing logs`);
+  
   const interval = setInterval(() => {
     if (!isOpen) {
       clearInterval(interval);
@@ -1208,12 +1300,14 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
 
     // Send new logs
     if (currentExecution.logs.length > lastLogIndex) {
-      console.log(`[SSE] Sending ${currentExecution.logs.length - lastLogIndex} new logs`);
+      console.log(`[SSE-SEND] Sending ${currentExecution.logs.length - lastLogIndex} new logs (prev: ${lastLogIndex}, now: ${currentExecution.logs.length})`);
       for (let i = lastLogIndex; i < currentExecution.logs.length; i++) {
-        const logData = `data: ${JSON.stringify(currentExecution.logs[i])}\n\n`;
+        const log = currentExecution.logs[i];
+        console.log(`[SSE-DATA] Sending log ${i}: type=${log.type}, msgLen=${log.message?.length || 0}`);
+        const logData = `data: ${JSON.stringify(log)}\n\n`;
         res.write(logData);
       }
-      res.flush?.();
+      if (res.flush) res.flush();
       lastLogIndex = currentExecution.logs.length;
     }
 
@@ -1268,7 +1362,9 @@ app.get('/api/mcp-status', async (req, res) => {
           args: serverConfig.args || []
         },
         connected: false,
+        authenticated: null,
         toolCount: 0,
+        authError: null,
         error: null
       };
 
@@ -1288,9 +1384,48 @@ app.get('/api/mcp-status', async (req, res) => {
         status.toolCount = tools.length;
         status.tools = tools;
 
+        // Additional auth health check for OneNote (transport can be connected while token is invalid)
+        if (serverName.toLowerCase() === 'onenote' && tools.some(tool => tool.name === 'listNotebooks')) {
+          try {
+            await mcpClient.callTool('listNotebooks', {});
+            status.authenticated = true;
+          } catch (authError) {
+            status.authenticated = false;
+            status.authError = authError.message;
+            const authErrorLower = String(authError.message || '').toLowerCase();
+            const isAuthRequired = authErrorLower.includes('authenticationrequirederror') ||
+                                  authErrorLower.includes('authentication required') ||
+                                  authErrorLower.includes('interaction required') ||
+                                  authErrorLower.includes('consent_required') ||
+                                  authErrorLower.includes('login required') ||
+                                  authErrorLower.includes('no account') ||
+                                  authErrorLower.includes('gettoken');
+            if (isAuthRequired) {
+              status.authHint = 'OneNote authentication required. Run authenticate, complete https://microsoft.com/devicelogin, then run saveAccessToken.';
+              status.authAction = 'authenticate_then_saveAccessToken';
+            }
+          }
+        }
+
         console.log(`✓ ${serverName}: Connected (${tools.length} tools)`);
       } catch (error) {
         status.error = error.message;
+        if (serverName.toLowerCase() === 'onenote') {
+          const errorLower = String(error.message || '').toLowerCase();
+          const isAuthRequired = errorLower.includes('authenticationrequirederror') ||
+                                 errorLower.includes('authentication required') ||
+                                 errorLower.includes('interaction required') ||
+                                 errorLower.includes('consent_required') ||
+                                 errorLower.includes('login required') ||
+                                 errorLower.includes('no account') ||
+                                 errorLower.includes('gettoken');
+          if (isAuthRequired) {
+            status.authenticated = false;
+            status.authError = error.message;
+            status.authHint = 'OneNote authentication required. Run authenticate, complete https://microsoft.com/devicelogin, then run saveAccessToken.';
+            status.authAction = 'authenticate_then_saveAccessToken';
+          }
+        }
         console.log(`✗ ${serverName}: ${error.message}`);
       }
 
@@ -1302,11 +1437,13 @@ app.get('/api/mcp-status', async (req, res) => {
 
     const connectedCount = serverStatuses.filter(s => s.connected).length;
     const totalCount = serverStatuses.length;
+    const unauthenticatedCount = serverStatuses.filter(s => s.authenticated === false).length;
 
     res.json({
       totalServers: totalCount,
       connectedServers: connectedCount,
       failedServers: totalCount - connectedCount,
+      unauthenticatedServers: unauthenticatedCount,
       servers: serverStatuses,
       timestamp: new Date().toISOString()
     });

@@ -407,22 +407,29 @@ function MCPStatus({ password, onBack }) {
         {status?.servers && status.servers.length > 0 ? (
           status.servers.map((server, index) => {
             const isExpanded = expandedServers.has(server.name)
+            const hasAuthIssue = server.connected && server.authenticated === false
+            const cardClassName = hasAuthIssue
+              ? 'bg-amber-50 border-amber-200'
+              : server.connected
+                ? 'bg-green-50 border-green-200'
+                : 'bg-red-50 border-red-200'
+
+            const dotClassName = hasAuthIssue
+              ? 'bg-amber-500'
+              : server.connected
+                ? 'bg-green-500'
+                : 'bg-red-500'
+
             return (
               <div
                 key={index}
-                className={`rounded-lg border ${
-                  server.connected
-                    ? 'bg-green-50 border-green-200'
-                    : 'bg-red-50 border-red-200'
-                }`}
+                className={`rounded-lg border ${cardClassName}`}
               >
                 <div className="p-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
-                        <div className={`w-3 h-3 rounded-full ${
-                          server.connected ? 'bg-green-500' : 'bg-red-500'
-                        }`}></div>
+                        <div className={`w-3 h-3 rounded-full ${dotClassName}`}></div>
                         <h4 className="font-semibold text-[#00203F]">{server.name}</h4>
                         {server.connected && (
                           <button
@@ -455,10 +462,17 @@ function MCPStatus({ password, onBack }) {
                             <span className="font-medium">Error:</span> {server.error}
                           </div>
                         )}
+                        {server.authError && (
+                          <div className="mt-2 p-2 bg-amber-100 rounded text-sm text-amber-800 border border-amber-300">
+                            <span className="font-medium">Auth:</span> {server.authError}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {server.connected ? (
+                      {hasAuthIssue ? (
+                        <span className="text-amber-700 font-medium text-sm">Auth Required</span>
+                      ) : server.connected ? (
                         <span className="text-green-600 font-medium text-sm">Connected</span>
                       ) : (
                         <span className="text-red-600 font-medium text-sm">Disconnected</span>

@@ -146,7 +146,7 @@ function ReportList({ reports, onReportSelect }) {
                 </p>
               )}
             </div>
-              <div className="ml-4 flex items-center">
+            <div className="ml-4 flex items-center">
               <div className="bg-teal-100 group-hover:bg-teal-200 rounded-full p-1.5 transition-colors">
                 <svg
                   className="w-5 h-5 text-[#00203F] group-hover:text-teal-700 group-hover:translate-x-1 transition-all"

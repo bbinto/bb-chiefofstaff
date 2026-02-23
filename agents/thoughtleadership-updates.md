@@ -8,7 +8,6 @@ Monitor multiple sources of product thought leadership and identify new topics, 
 - AI critiques (configured in config.json under `thoughtleadership.AICritics`)
 - RSS feeds (configured in config.json under `thoughtleadership.rssFeeds`)
 - Industry news sources (configured in config.json under `thoughtleadership.industryNewsSources`)
-- **Google Scholar** - Academic research articles via Google Scholar MCP (configured in Claude Desktop)
 - Not slack
 
 ## Date Range Parameters (Optional)
@@ -139,22 +138,6 @@ You are the Product Updates Around Me Agent. Your job is to scan multiple source
   - **Capture the direct article URL/link** from each RSS feed item for inclusion in your output
   - **Note the source feed URL and feed name** for each article for correct attribution
 
-### 3.5. Google Scholar Research
-- **Use Google Scholar MCP tools** (configured in Claude Desktop) to search for academic research
-- Search query: **"AI & Engagement Software"**
-- **Filter for articles published in the last day**: 
-  - Calculate yesterday's date (today minus 1 day) in ISO format: `YYYY-MM-DD`
-  - Use date filtering to find articles published in the last 24 hours
-  - Example: If today is 2026-01-15, search for articles from 2026-01-14 onwards
-- **Select the top 2 most recent articles** from the search results
-- For each article, extract:
-  - Title and authors
-  - Publication date (must be within last day)
-  - Abstract or key findings
-  - Link to the Google Scholar article
-  - Relevance to AI and engagement software
-- Focus on research that has practical implications for product management or engagement software development
-
 ### 4. Topic Identification and Categorization
 For each source, identify:
 - **New Topics**: Concepts, frameworks, or ideas that are newly emerging
@@ -283,27 +266,6 @@ For each trending topic:
 - **ALWAYS check article author and article URL domain** - If author is John Cutler and URL is johnpcutler.com, use "John Cutler's The Beautiful Mess", NOT "Lenny's Newsletter"
 - **Thought leader should match article author** - do not use feed author if article author is different
 
-### Google Scholar Research (Top 2 Most Recent from Last Day)
-**Search Query**: "AI & Engagement Software"
-
-For each of the top 2 most recent articles published in the last day:
-
-1. **Title**: [Article Title](google-scholar-url)
-   - **Authors**: [Author names]
-   - **Published**: [Date within last day]
-   - **Abstract/Key Findings**: [Brief summary of research findings]
-   - **Relevance**: [How it relates to AI and engagement software]
-   - **Practical Implications**: [What this means for product management or software development]
-
-2. **Title**: [Article Title](google-scholar-url)
-   - **Authors**: [Author names]
-   - **Published**: [Date within last day]
-   - **Abstract/Key Findings**: [Brief summary of research findings]
-   - **Relevance**: [How it relates to AI and engagement software]
-   - **Practical Implications**: [What this means for product management or software development]
-
-**IMPORTANT**: Format article titles as markdown links: `[Title](google-scholar-url)` where the url is the direct link to the Google Scholar article. Only include articles published in the last day (last 24 hours).
-
 ### Recommended Actions
 - Topics to research further: [List]
 - Discussions to initiate with team: [List]
@@ -312,8 +274,6 @@ For each of the top 2 most recent articles published in the last day:
 
 ## Success Criteria
 - All configured data sources are checked
-- Google Scholar searched for "AI & Engagement Software" with articles from last day
-- Top 2 most recent articles from Google Scholar included
 - **ONLY articles published within the specified date range are included** - old articles are filtered out
 - **All sources correctly attributed using article-level metadata (author + URL domain/publication)** - NOT feed names
 - **Article authors correctly identified from article author fields** - do not use feed author if article author differs

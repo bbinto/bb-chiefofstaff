@@ -29,9 +29,10 @@ export class AgentRunner {
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
     this.agentParams = agentParams; // { slackUserId: 'U...', folder: 'week1', etc. }
     
-    // Detect if using Ollama or Anthropic
+    // Detect which LLM backend to use
     this.useOllama = process.env.USE_OLLAMA === 'true';
-    
+    this.useGemini = process.env.USE_GEMINI === 'true';
+
     if (this.useOllama) {
       console.log('🦙 Using local Ollama LLM');
       const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
@@ -42,6 +43,14 @@ export class AgentRunner {
       this.model = process.env.OLLAMA_MODEL || 'mistral';
       console.log(`  Model: ${this.model}`);
       console.log(`  Base URL: ${ollamaBaseUrl}`);
+    } else if (this.useGemini) {
+      console.log('💎 Using Google Gemini API');
+      this.geminiClient = new OpenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/'
+      });
+      this.model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+      console.log(`  Model: ${this.model}`);
     } else {
       console.log('🔑 Using Anthropic Claude API');
       this.anthropic = new Anthropic({
@@ -130,6 +139,65 @@ export class AgentRunner {
   }
 
   /**
+   * Convert Anthropic format to OpenAI format for Gemini
+   * Gemini uses OpenAI's chat.completion format via its compatibility endpoint
+   */
+  convertParamsForGemini(params) {
+    const converted = {
+      model: this.model,
+      messages: params.messages,
+      max_tokens: params.max_tokens || 8000,
+      temperature: params.temperature,
+    };
+
+    // Gemini supports function calling via its OpenAI-compatible API
+    // but the tool format needs to match OpenAI's function calling format
+    if (params.tools && params.tools.length > 0) {
+      converted.tools = params.tools.map(tool => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description || '',
+          parameters: tool.input_schema || { type: 'object', properties: {}, required: [] }
+        }
+      }));
+    }
+
+    return converted;
+  }
+
+  /**
+   * Convert OpenAI/Gemini response to Anthropic format for compatibility
+   */
+  convertResponseFromGemini(openaiResponse) {
+    const content = [];
+
+    if (openaiResponse.choices && openaiResponse.choices[0]) {
+      const choice = openaiResponse.choices[0];
+      if (choice.message && choice.message.content) {
+        content.push({
+          type: 'text',
+          text: choice.message.content
+        });
+      }
+    }
+
+    return {
+      id: openaiResponse.id,
+      type: 'message',
+      role: 'assistant',
+      content: content,
+      model: openaiResponse.model,
+      stop_reason: openaiResponse.choices?.[0]?.finish_reason || 'end_turn',
+      stop_sequence: null,
+      usage: {
+        input_tokens: openaiResponse.usage?.prompt_tokens || 0,
+        output_tokens: openaiResponse.usage?.completion_tokens || 0
+      }
+    };
+  }
+
+  /**
    * Make API call with rate limiting and retry logic
    */
   async makeApiCall(params, retries = RETRY_CONFIG.MAX_RETRIES) {
@@ -150,6 +218,10 @@ export class AgentRunner {
           const ollamaParams = this.convertParamsForOllama(params);
           const ollamaResponse = await this.anthropic.chat.completions.create(ollamaParams);
           response = this.convertResponseFromOllama(ollamaResponse);
+        } else if (this.useGemini) {
+          const geminiParams = this.convertParamsForGemini(params);
+          const geminiResponse = await this.geminiClient.chat.completions.create(geminiParams);
+          response = this.convertResponseFromGemini(geminiResponse);
         } else {
           response = await this.anthropic.messages.create(params);
         }
@@ -237,6 +309,9 @@ export class AgentRunner {
 
     const startTime = Date.now(); // Track execution start time
     const instructions = this.loadAgentInstructions(agentName);
+
+    // Note: Preflight checks removed - Claude will handle MCP tool availability directly
+    // (just like onenote-todos does)
 
     // Prepare context with configuration (will be cached). Pass agentName for agent-specific slim context.
     this.contextMessage = this.buildContextMessage(agentName);
@@ -594,73 +669,102 @@ export class AgentRunner {
         console.log(`Agent is using ${toolUses.length} tool(s): ${toolUses.map(t => t.name).join(', ')}`);
 
         // Execute all tools in parallel
-        const toolResults = await Promise.all(
+        let toolResults = await Promise.all(
           toolUses.map(async (toolUse) => {
-            let toolResult;
+            try {
+              let toolResult;
 
-            // Debug: Log exact tool name being called
-            console.log(`\n🔧 Calling tool: "${toolUse.name}" (length: ${toolUse.name.length} chars)`);
+              // Debug: Log exact tool name being called
+              console.log(`\n🔧 Calling tool: "${toolUse.name}" (length: ${toolUse.name.length} chars)`);
 
-            // Check if it's a custom filesystem tool
-            if (toolUse.name === 'read_file_from_manual_sources' ||
-                toolUse.name === 'list_manual_sources_files' ||
-                toolUse.name === 'list_reports_in_week' ||
-                toolUse.name === 'read_report_file' ||
-                toolUse.name === 'get_current_time') {
-              toolResult = await this.handleCustomTool(toolUse.name, toolUse.input);
-            } else {
-              // Use MCP client for other tools
-              toolResult = await this.mcpClient.callTool(toolUse.name, toolUse.input);
-            }
-
-            // Summarize large tool results to reduce token usage
-            const resultString = JSON.stringify(toolResult);
-            const resultLength = resultString.length;
-
-            // If result is larger than 20k characters (~5k tokens), summarize it
-            // Lowered from 50k to catch more cases and prevent token limit issues
-            if (resultLength > 20000) {
-              console.log(`⚠️  Large tool result from ${toolUse.name} (${Math.round(resultLength/1000)}k chars, ~${Math.round(resultLength/TOKEN_LIMITS.CHARS_PER_TOKEN/1000)}k tokens), summarizing...`);
-
-              // Try to intelligently truncate based on result type
-              if (Array.isArray(toolResult)) {
-                // For arrays, keep fewer items (30 instead of 50) to save tokens
-                const keepItems = Math.min(30, toolResult.length);
-                toolResult = {
-                  _summary: `Array truncated: showing first ${keepItems} of ${toolResult.length} items. Use this sample to understand the data structure and patterns.`,
-                  _total_items: toolResult.length,
-                  items: toolResult.slice(0, keepItems)
-                };
-              } else if (typeof toolResult === 'object' && toolResult !== null) {
-                // Keep structure but truncate large string values more aggressively
-                const summarized = {};
-                for (const [key, value] of Object.entries(toolResult)) {
-                  if (typeof value === 'string' && value.length > 3000) {
-                    // Truncate strings more aggressively (3k instead of 5k)
-                    summarized[key] = value.substring(0, 3000) + `... [truncated ${Math.round((value.length - 3000)/1000)}k more chars]`;
-                  } else if (Array.isArray(value) && value.length > 20) {
-                    // Truncate large arrays within objects
-                    summarized[key] = value.slice(0, 20);
-                    summarized[`${key}_truncated`] = `Showing first 20 of ${value.length} items`;
-                  } else {
-                    summarized[key] = value;
-                  }
-                }
-                toolResult = {
-                  _summary: 'Large object values truncated to reduce token usage',
-                  ...summarized
-                };
-              } else if (typeof toolResult === 'string' && toolResult.length > 20000) {
-                // For very large strings, truncate more aggressively
-                toolResult = toolResult.substring(0, 15000) + `\n\n[Content truncated: ${Math.round((toolResult.length - 15000)/1000)}k more characters removed to stay within token limits]`;
+              // Check if it's a custom filesystem tool
+              if (toolUse.name === 'read_file_from_manual_sources' ||
+                  toolUse.name === 'list_manual_sources_files' ||
+                  toolUse.name === 'list_reports_in_week' ||
+                  toolUse.name === 'read_report_file' ||
+                  toolUse.name === 'get_current_time') {
+                toolResult = await this.handleCustomTool(toolUse.name, toolUse.input);
+              } else {
+                // Use MCP client for other tools
+                toolResult = await this.mcpClient.callTool(toolUse.name, toolUse.input);
               }
-            }
 
-            return {
-              type: 'tool_result',
-              tool_use_id: toolUse.id,
-              content: JSON.stringify(toolResult)
-            };
+              // Summarize large tool results to reduce token usage
+              const resultString = JSON.stringify(toolResult);
+              const resultLength = resultString.length;
+
+              // If result is larger than 20k characters (~5k tokens), summarize it
+              // Lowered from 50k to catch more cases and prevent token limit issues
+              if (resultLength > 20000) {
+                console.log(`⚠️  Large tool result from ${toolUse.name} (${Math.round(resultLength/1000)}k chars, ~${Math.round(resultLength/TOKEN_LIMITS.CHARS_PER_TOKEN/1000)}k tokens), summarizing...`);
+
+                // Try to intelligently truncate based on result type
+                if (Array.isArray(toolResult)) {
+                  // For arrays, keep fewer items (30 instead of 50) to save tokens
+                  const keepItems = Math.min(30, toolResult.length);
+                  toolResult = {
+                    _summary: `Array truncated: showing first ${keepItems} of ${toolResult.length} items. Use this sample to understand the data structure and patterns.`,
+                    _total_items: toolResult.length,
+                    items: toolResult.slice(0, keepItems)
+                  };
+                } else if (typeof toolResult === 'object' && toolResult !== null) {
+                  // Keep structure but truncate large string values more aggressively
+                  const summarized = {};
+                  for (const [key, value] of Object.entries(toolResult)) {
+                    if (typeof value === 'string' && value.length > 3000) {
+                      // Truncate strings more aggressively (3k instead of 5k)
+                      summarized[key] = value.substring(0, 3000) + `... [truncated ${Math.round((value.length - 3000)/1000)}k more chars]`;
+                    } else if (Array.isArray(value) && value.length > 20) {
+                      // Truncate large arrays within objects
+                      summarized[key] = value.slice(0, 20);
+                      summarized[`${key}_truncated`] = `Showing first 20 of ${value.length} items`;
+                    } else {
+                      summarized[key] = value;
+                    }
+                  }
+                  toolResult = {
+                    _summary: 'Large object values truncated to reduce token usage',
+                    ...summarized
+                  };
+                } else if (typeof toolResult === 'string' && toolResult.length > 20000) {
+                  // For very large strings, truncate more aggressively
+                  toolResult = toolResult.substring(0, 15000) + `\n\n[Content truncated: ${Math.round((toolResult.length - 15000)/1000)}k more characters removed to stay within token limits]`;
+                }
+              }
+
+              return {
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: JSON.stringify(toolResult)
+              };
+            } catch (toolError) {
+              const toolErrorMessage = toolError?.message || toolError?.error?.message || 'Unknown tool error';
+              const errorLower = toolErrorMessage.toLowerCase();
+              const isAuthRequired = errorLower.includes('authenticationrequirederror') ||
+                                     errorLower.includes('authentication required') ||
+                                     errorLower.includes('interaction required') ||
+                                     errorLower.includes('consent_required') ||
+                                     errorLower.includes('login required') ||
+                                     errorLower.includes('no account') ||
+                                     errorLower.includes('gettoken');
+
+              console.warn(`⚠️  Tool ${toolUse.name} failed: ${toolErrorMessage}`);
+              if (isAuthRequired) {
+                console.warn(`⚠️  ${toolUse.name} appears to require interactive authentication. Returning tool-level auth error so the agent can continue.`);
+              }
+
+              return {
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                is_error: true,
+                content: JSON.stringify({
+                  error: true,
+                  tool: toolUse.name,
+                  authRequired: isAuthRequired,
+                  message: toolErrorMessage
+                })
+              };
+            }
           })
         );
 

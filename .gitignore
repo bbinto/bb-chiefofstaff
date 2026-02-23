@@ -63,3 +63,8 @@ frontend/vercel.json
 frontend/vite.config.js
 MIXPANEL_MCP_SETUP.md
 Untitled
+claude_desktop_config.json
+setup-daily-cron.sh
+claude_desktop_config_dontuse.json
+OLLAMA_INTEGRATION.md
+OLLAMA_SETUP.md
