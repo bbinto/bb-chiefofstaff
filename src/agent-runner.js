@@ -958,7 +958,7 @@ export class AgentRunner {
         console.error('  2. Split the agent work into smaller tasks');
         console.error('  3. Reduce the number of data sources processed at once');
         console.error('  4. For business-health: process fewer Slack channels or shorter time periods');
-        console.error('  5. For officevibe-strategy-roadmap: process feedback pages in batches');
+        console.error('  5. For strategy-roadmap: process feedback pages in batches');
       } else if (isRateLimitError) {
         console.error('Rate limit exceeded. The system will retry with exponential backoff.');
         console.error('If this persists, consider:');

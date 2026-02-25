@@ -201,7 +201,7 @@ Note: When using npm, you MUST use '--' before any arguments
 
 Available Agents:
   - weekly-recap                    Weekly team catch-up and recap
-  - business-health                 Officevibe business and product health
+  - business-health                 Business and product health
   - product-engineering             Product development and engineering updates
   - okr-progress                    OKR updates and progress tracking
   - release-tracker                 Track product releases with adoption metrics, feedback, and OKR alignment
