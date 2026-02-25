@@ -205,6 +205,9 @@ export class ReportGenerator {
     if (result.executionTimeMin) {
       metadata += `**Execution Time**: ${result.executionTimeMin} min\n`;
     }
+    if (result.llmBackend) {
+      metadata += `**LLM**: ${result.llmBackend} (${result.llmModel})\n`;
+    }
     
     const metadataSection = metadata ? `${metadata}\n` : '';
 

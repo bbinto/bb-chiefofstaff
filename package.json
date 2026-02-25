@@ -21,8 +21,12 @@
   ],
   "author": "",
   "license": "MIT",
+  "overrides": {
+    "whatwg-url": "^14.0.0",
+    "tr46": "^5.0.0"
+  },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.0",
+    "@anthropic-ai/sdk": "^0.78.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "dotenv": "^16.4.5",
     "mermaid": "^11.12.2",

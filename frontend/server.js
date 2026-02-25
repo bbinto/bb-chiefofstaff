@@ -56,16 +56,17 @@ const PORT = FRONTEND.PORT;
 // Password protection configuration
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || null;
+const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || null;
 
 // LLM Settings - stored in memory (defaults from environment)
 let llmSettings = {
   useOllama: process.env.USE_OLLAMA === 'true',
   useGemini: process.env.USE_GEMINI === 'true',
   ollamaModel: process.env.OLLAMA_MODEL || 'mistral',
-  ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+  ollamaBaseUrl: 'http://localhost:11434',
+  ollamaApiKey: process.env.OLLAMA_API_KEY || '',
   claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash'
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite'
 };
 
 function buildLightReportPrompt(filename, reportContent) {
@@ -180,11 +181,13 @@ async function generateLightReportWithClaude(promptText) {
 
 async function generateLightReportWithOllama(promptText) {
   const endpoint = buildOllamaChatUrl(llmSettings.ollamaBaseUrl);
+  const ollamaHeaders = { 'Content-Type': 'application/json' };
+  if (llmSettings.ollamaApiKey) {
+    ollamaHeaders['Authorization'] = `Bearer ${llmSettings.ollamaApiKey}`;
+  }
   const response = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
+    headers: ollamaHeaders,
     body: JSON.stringify({
       model: llmSettings.ollamaModel || 'mistral',
       temperature: 0.2,
@@ -214,18 +217,18 @@ async function generateLightReportWithOllama(promptText) {
 }
 
 async function generateLightReportWithGemini(promptText) {
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not set. Configure Gemini API key in your .env file.');
+  if (!GOOGLE_GEMINI_API_KEY) {
+    throw new Error('GOOGLE_GEMINI_API_KEY is not set. Configure Gemini API key in your .env file.');
   }
 
-  const model = llmSettings.geminiModel || 'gemini-2.0-flash';
+  const model = llmSettings.geminiModel || 'gemini-2.0-flash-lite';
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GEMINI_API_KEY}`
+        'Authorization': `Bearer ${GOOGLE_GEMINI_API_KEY}`
       },
       body: JSON.stringify({
         model,
@@ -473,6 +476,15 @@ function extractExecutionTime(content) {
   return null;
 }
 
+/**
+ * Extract LLM info from report content
+ * Looks for pattern: **LLM**: Backend (model)
+ */
+function extractLLM(content) {
+  const match = content.match(/\*\*LLM\*\*:\s*(.+)/);
+  return match ? match[1].trim() : null;
+}
+
 // Get all reports
 app.get('/api/reports', (req, res) => {
   try {
@@ -515,6 +527,7 @@ app.get('/api/reports', (req, res) => {
         let insights = [];
         let cost = null;
         let executionTime = null;
+        let llm = null;
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
           oneLineSummary = extractOneLineSummary(content);
@@ -525,6 +538,7 @@ app.get('/api/reports', (req, res) => {
           // Extract cost and execution time from content
           cost = extractCost(content);
           executionTime = extractExecutionTime(content);
+          llm = extractLLM(content);
         } catch (err) {
           console.error(`Error reading ${file} for summary:`, err.message);
         }
@@ -540,7 +554,8 @@ app.get('/api/reports', (req, res) => {
           oneLineSummary,
           insights,
           cost,
-          executionTime
+          executionTime,
+          llm
         };
       })
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -973,6 +988,7 @@ app.post('/api/run-agents', async (req, res) => {
       USE_GEMINI: llmSettings.useGemini.toString(),
       OLLAMA_MODEL: llmSettings.ollamaModel,
       OLLAMA_BASE_URL: llmSettings.ollamaBaseUrl,
+      OLLAMA_API_KEY: llmSettings.ollamaApiKey || '',
       CLAUDE_MODEL: llmSettings.claudeModel,
       GEMINI_MODEL: llmSettings.geminiModel,
       // Unbuffer output to ensure real-time logs
@@ -1001,18 +1017,20 @@ app.post('/api/run-agents', async (req, res) => {
       startTime: new Date()
     });
 
-    // Capture stdout
+    // Capture stdout — echo to CLI and store for frontend
     child.stdout.on('data', (data) => {
       const log = data.toString();
+      process.stdout.write(log);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stdout', message: log, timestamp: new Date() });
       }
     });
 
-    // Capture stderr
+    // Capture stderr — echo to CLI and store for frontend
     child.stderr.on('data', (data) => {
       const log = data.toString();
+      process.stderr.write(log);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stderr', message: log, timestamp: new Date() });
@@ -1202,7 +1220,7 @@ app.get('/api/settings/llm', (req, res) => {
 // Update LLM settings
 app.put('/api/settings/llm', (req, res) => {
   try {
-    const { useOllama, useGemini, ollamaModel, ollamaBaseUrl, claudeModel, geminiModel } = req.body;
+    const { useOllama, useGemini, ollamaModel, ollamaApiKey, claudeModel, geminiModel } = req.body;
 
     // Validate input
     if (useOllama !== undefined && typeof useOllama !== 'boolean') {
@@ -1220,7 +1238,7 @@ app.put('/api/settings/llm', (req, res) => {
     if (useOllama !== undefined) llmSettings.useOllama = useOllama;
     if (useGemini !== undefined) llmSettings.useGemini = useGemini;
     if (ollamaModel) llmSettings.ollamaModel = ollamaModel;
-    if (ollamaBaseUrl) llmSettings.ollamaBaseUrl = ollamaBaseUrl;
+    if (ollamaApiKey !== undefined) llmSettings.ollamaApiKey = ollamaApiKey;
     if (claudeModel) llmSettings.claudeModel = claudeModel;
     if (geminiModel) llmSettings.geminiModel = geminiModel;
 
@@ -1234,6 +1252,7 @@ app.put('/api/settings/llm', (req, res) => {
     console.log(`   Backend : ${activeBackend}`);
     console.log(`   Model   : ${activeModel}`);
     if (llmSettings.useOllama) console.log(`   URL     : ${llmSettings.ollamaBaseUrl}`);
+    if (llmSettings.useOllama && llmSettings.ollamaApiKey) console.log(`   API Key : ${llmSettings.ollamaApiKey.substring(0, 8)}...`);
     console.log('═'.repeat(60));
     console.log('');
 
@@ -1266,10 +1285,7 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  console.log(`[SSE] Client connected for execution ${executionId}`);
-
   // Send existing logs immediately
-  console.log(`[SSE] Sending ${execution.logs.length} existing logs`);
   execution.logs.forEach(log => {
     const logData = `data: ${JSON.stringify(log)}\n\n`;
     res.write(logData);
@@ -1281,8 +1297,7 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
   
   // Set up interval to check for new logs
   let lastLogIndex = execution.logs.length;
-  console.log(`[SSE-INIT] Client connected, ${lastLogIndex} existing logs`);
-  
+
   const interval = setInterval(() => {
     if (!isOpen) {
       clearInterval(interval);
@@ -1291,7 +1306,6 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
     
     const currentExecution = activeExecutions.get(executionId);
     if (!currentExecution) {
-      console.log(`[SSE] Execution ${executionId} no longer found`);
       clearInterval(interval);
       try { res.end(); } catch (e) {}
       isOpen = false;
@@ -1300,10 +1314,8 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
 
     // Send new logs
     if (currentExecution.logs.length > lastLogIndex) {
-      console.log(`[SSE-SEND] Sending ${currentExecution.logs.length - lastLogIndex} new logs (prev: ${lastLogIndex}, now: ${currentExecution.logs.length})`);
       for (let i = lastLogIndex; i < currentExecution.logs.length; i++) {
         const log = currentExecution.logs[i];
-        console.log(`[SSE-DATA] Sending log ${i}: type=${log.type}, msgLen=${log.message?.length || 0}`);
         const logData = `data: ${JSON.stringify(log)}\n\n`;
         res.write(logData);
       }
@@ -1313,7 +1325,6 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
 
     // Send status update when complete
     if (currentExecution.status !== 'running') {
-      console.log(`[SSE] Sending final status: ${currentExecution.status}`);
       const statusData = `data: ${JSON.stringify({ type: 'status', status: currentExecution.status, exitCode: currentExecution.exitCode })}\n\n`;
       res.write(statusData);
       res.flush?.();
@@ -1325,13 +1336,11 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
 
   // Clean up on client disconnect
   req.on('close', () => {
-    console.log(`[SSE] Client disconnected from execution ${executionId}`);
     isOpen = false;
     clearInterval(interval);
   });
-  
-  req.on('error', (err) => {
-    console.log(`[SSE] Error on execution ${executionId}:`, err.message);
+
+  req.on('error', () => {
     isOpen = false;
     clearInterval(interval);
   });

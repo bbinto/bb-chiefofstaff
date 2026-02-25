@@ -234,7 +234,7 @@ export class MCPClientManager {
     const transport = new StdioClientTransport({
       command,
       args,
-      env: { ...process.env, ...env, ...mixpanelEnv }
+      env: { ...process.env, NODE_NO_WARNINGS: '1', ...env, ...mixpanelEnv }
     });
 
     const client = new Client({

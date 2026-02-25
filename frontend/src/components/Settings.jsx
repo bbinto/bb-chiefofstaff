@@ -11,9 +11,8 @@ function Settings({ password, onBack }) {
   const [llmSettings, setLlmSettings] = useState(null)
   const [llmBackend, setLlmBackend] = useState('claude') // 'claude' | 'ollama' | 'gemini'
   const [ollamaModel, setOllamaModel] = useState('mistral')
-  const [ollamaBaseUrl, setOllamaBaseUrl] = useState('http://localhost:11434')
   const [claudeModel, setClaudeModel] = useState('claude-sonnet-4-5-20250929')
-  const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash')
+  const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash-lite')
   
   // Config state
   const [config, setConfig] = useState(null)
@@ -27,16 +26,21 @@ function Settings({ password, onBack }) {
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [error, setError] = useState(null)
   const [validationError, setValidationError] = useState(null)
-  const [testingConnection, setTestingConnection] = useState(false)
-  const [testResult, setTestResult] = useState(null)
 
-  const commonOllamaModels = [
+  const localOllamaModels = [
     { value: 'mistral', label: 'Mistral 7B (Fast, Good quality)' },
     { value: 'neural-chat', label: 'Neural Chat 7B (Fast, Instruction-tuned)' },
     { value: 'openchat', label: 'OpenChat 8B (Fast, Lightweight)' },
     { value: 'dolphin-mixtral', label: 'Dolphin Mixtral 8x7B (Slow, High quality)' },
     { value: 'llama2', label: 'Llama 2 13B (Medium, Good reasoning)' },
     { value: 'neural-chat:latest', label: 'Neural Chat Latest' },
+  ]
+
+  const cloudOllamaModels = [
+    { value: 'gpt-oss:120b-cloud', label: 'GPT-OSS 120B (Cloud, High quality)' },
+    { value: 'qwen3-vl:235b-cloud', label: 'Qwen3 VL 235B (Cloud, Vision + Language)' },
+    { value: 'llama3.3:70b-cloud', label: 'Llama 3.3 70B (Cloud, High quality)' },
+    { value: 'qwen2.5:72b-cloud', label: 'Qwen 2.5 72B (Cloud, Multilingual)' },
   ]
 
   useEffect(() => {
@@ -72,7 +76,6 @@ function Settings({ password, onBack }) {
         setLlmBackend('claude')
       }
       setOllamaModel(data.ollamaModel || 'mistral')
-      setOllamaBaseUrl(data.ollamaBaseUrl || 'http://localhost:11434')
       setClaudeModel(data.claudeModel || 'claude-sonnet-4-5-20250929')
       setGeminiModel(data.geminiModel || 'gemini-2.0-flash')
       setError(null)
@@ -96,7 +99,6 @@ function Settings({ password, onBack }) {
         useOllama: llmBackend === 'ollama',
         useGemini: llmBackend === 'gemini',
         ollamaModel: llmBackend === 'ollama' ? ollamaModel : undefined,
-        ollamaBaseUrl: llmBackend === 'ollama' ? ollamaBaseUrl : undefined,
         claudeModel: llmBackend === 'claude' ? claudeModel : undefined,
         geminiModel: llmBackend === 'gemini' ? geminiModel : undefined,
       }
@@ -122,45 +124,6 @@ function Settings({ password, onBack }) {
       console.error('❌ Error saving settings:', err)
     } finally {
       setSaving(false)
-    }
-  }
-
-  const handleTestOllamaConnection = async () => {
-    try {
-      setTestingConnection(true)
-      setTestResult(null)
-
-      const response = await fetch(`${ollamaBaseUrl}/models`, {
-        method: 'GET',
-      }).catch(e => {
-        throw new Error(`Connection failed: ${e.message}`)
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: Ollama server returned an error`)
-      }
-
-      const data = await response.json()
-      
-      if (data.models && Array.isArray(data.models)) {
-        const modelNames = data.models.map(m => m.name || m.model).join(', ')
-        setTestResult({
-          success: true,
-          message: `✅ Connected! Found ${data.models.length} model(s): ${modelNames.substring(0, 100)}${modelNames.length > 100 ? '...' : ''}`
-        })
-      } else {
-        setTestResult({
-          success: true,
-          message: '✅ Connected to Ollama server'
-        })
-      }
-    } catch (err) {
-      setTestResult({
-        success: false,
-        message: `❌ Connection failed: ${err.message}. Make sure Ollama is running at ${ollamaBaseUrl}`
-      })
-    } finally {
-      setTestingConnection(false)
     }
   }
 
@@ -401,7 +364,9 @@ function Settings({ password, onBack }) {
                 >
                   <option value="claude-opus-4-1-20250805">Claude Opus 4.1 (Latest, Most capable)</option>
                   <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Recommended)</option>
-                  <option value="claude-haiku-3-5-20241022">Claude Haiku 3.5 (Fast, Budget-friendly)</option>
+                  <option value="claude-3-5-haiku-20241022">Claude Haiku 3.5 (Fast, Budget-friendly)</option>
+                  <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast, Budget-friendly)</option>
+                  <option value="claude-3-haiku-20240307">Claude 3 Haiku (Cheapest, ~$0.25/M input)</option>
                 </select>
                 <p className="text-xs text-gray-600 mt-1">
                   ℹ️ Claude Sonnet 4.5 offers the best balance of speed and quality for agents.
@@ -426,18 +391,19 @@ function Settings({ password, onBack }) {
                   onChange={(e) => setGeminiModel(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 >
-                  <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recommended, Fast)</option>
-                  <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Fastest, Budget)</option>
-                  <option value="gemini-1.5-pro">Gemini 1.5 Pro (High quality, Large context)</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast, Efficient)</option>
+                  <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Default — cheapest, best rate limits)</option>
+                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Newer, 15 RPM / 1000 RPD free)</option>
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash (Better quality, higher cost)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Best quality flash, 10 RPM / 250 RPD free)</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Legacy, fast)</option>
                 </select>
                 <p className="text-xs text-gray-600 mt-1">
-                  💡 Gemini 2.0 Flash offers the best speed/quality balance.
+                  💡 <strong>Flash Lite</strong> is cheapest ($0.075/$0.30 per 1M tokens) with the best free rate limits.
                 </p>
               </div>
 
               <div className="p-3 bg-purple-100 rounded text-sm text-purple-800">
-                ℹ️ Your API key is configured via the <code className="bg-purple-200 px-1 rounded">GEMINI_API_KEY</code> environment variable.
+                ℹ️ Your API key is configured via the <code className="bg-purple-200 px-1 rounded">GOOGLE_GEMINI_API_KEY</code> environment variable.
               </div>
 
               <div className="p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800 space-y-1">
@@ -452,60 +418,31 @@ function Settings({ password, onBack }) {
               <h3 className="text-lg font-semibold text-gray-900">Ollama Configuration</h3>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Ollama Base URL</label>
-                <input
-                  type="text"
-                  value={ollamaBaseUrl}
-                  onChange={(e) => setOllamaBaseUrl(e.target.value)}
-                  placeholder="http://localhost:11434"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent font-mono text-sm"
-                />
-                <p className="text-xs text-gray-600 mt-1">
-                  ℹ️ Default: <code className="bg-gray-200 px-1 rounded">http://localhost:11434</code> (adjust if Ollama is on a different host/port)
-                </p>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-gray-700">Model</label>
-                  <button
-                    onClick={handleTestOllamaConnection}
-                    disabled={testingConnection}
-                    className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400 transition-colors"
-                  >
-                    {testingConnection ? 'Testing...' : '🔗 Test Connection'}
-                  </button>
-                </div>
-
+                <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
                 <select
                   value={ollamaModel}
                   onChange={(e) => setOllamaModel(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                 >
-                  {commonOllamaModels.map(model => (
-                    <option key={model.value} value={model.value}>{model.label}</option>
-                  ))}
-                  <option value="" disabled>──────────────</option>
-                  <option value={ollamaModel}>{ollamaModel} (current)</option>
+                  <optgroup label="☁️ Cloud Models (no local install needed)">
+                    {cloudOllamaModels.map(model => (
+                      <option key={model.value} value={model.value}>{model.label}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="🖥️ Local Models (requires Ollama running locally)">
+                    {localOllamaModels.map(model => (
+                      <option key={model.value} value={model.value}>{model.label}</option>
+                    ))}
+                  </optgroup>
+                  {!localOllamaModels.find(m => m.value === ollamaModel) && !cloudOllamaModels.find(m => m.value === ollamaModel) && (
+                    <optgroup label="Current">
+                      <option value={ollamaModel}>{ollamaModel}</option>
+                    </optgroup>
+                  )}
                 </select>
                 <p className="text-xs text-gray-600 mt-1">
-                  💡 Recommended: <strong>mistral</strong> (fast) or <strong>neural-chat</strong> (instruction-tuned)
+                  ☁️ Cloud models run remotely — easy on your Pi. 🖥️ Local models require <code className="bg-gray-200 px-1 rounded">ollama serve</code>.
                 </p>
-              </div>
-
-              {testResult && (
-                <div className={`p-3 rounded text-sm ${testResult.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                  {testResult.message}
-                </div>
-              )}
-
-              <div className="p-3 bg-amber-100 rounded text-sm text-amber-800 space-y-1">
-                <p>⚠️ <strong>Setup Required:</strong></p>
-                <ul className="list-disc list-inside space-y-1">
-                  <li>Have Ollama installed from <a href="https://ollama.ai" target="_blank" rel="noopener noreferrer" className="underline">ollama.ai</a></li>
-                  <li>Run <code className="bg-amber-200 px-1 rounded">ollama serve</code> in a terminal</li>
-                  <li>Pull a model: <code className="bg-amber-200 px-1 rounded">ollama pull {ollamaModel}</code></li>
-                </ul>
               </div>
             </div>
           )}
@@ -528,7 +465,7 @@ function Settings({ password, onBack }) {
                   </div>
                   <div className="flex justify-between">
                     <span>URL:</span>
-                    <span>{ollamaBaseUrl}</span>
+                    <span>http://localhost:11434</span>
                   </div>
                 </>
               ) : llmBackend === 'gemini' ? (
@@ -564,7 +501,7 @@ function Settings({ password, onBack }) {
 
           {/* Info Box */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
-            <strong>ℹ️ How it works:</strong> When you save these settings, all new agent runs will use the selected LLM. Claude is always the default. For Ollama setup instructions, see <strong>OLLAMA_SETUP.md</strong>. For Gemini, add <code className="bg-blue-200 px-1 rounded">GEMINI_API_KEY</code> to your <code className="bg-blue-200 px-1 rounded">.env</code> file.
+            <strong>ℹ️ How it works:</strong> When you save these settings, all new agent runs will use the selected LLM. Claude is always the default. For Ollama setup instructions, see <strong>OLLAMA_SETUP.md</strong>. For Gemini, add <code className="bg-blue-200 px-1 rounded">GOOGLE_GEMINI_API_KEY</code> to your <code className="bg-blue-200 px-1 rounded">.env</code> file.
           </div>
         </div>
       ) : (

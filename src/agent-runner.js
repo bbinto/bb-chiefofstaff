@@ -5,7 +5,7 @@ import path from 'path';
 import { RateLimiter } from './agent/rate-limiter.js';
 import { MessageTruncator } from './agent/message-truncator.js';
 import { ToolHandler } from './agent/tool-handler.js';
-import { calculateDateRange, formatDateRangeDisplay, parseCalendarWeek, getCalendarWeekDateRange } from './utils/date-utils.js';
+import { calculateDateRange, formatDateRangeDisplay, parseCalendarWeek, getCalendarWeekDateRange, getISOWeekNumber } from './utils/date-utils.js';
 import {
   API_DEFAULTS,
   PATHS,
@@ -35,21 +35,20 @@ export class AgentRunner {
 
     if (this.useOllama) {
       console.log('🦙 Using local Ollama LLM');
-      const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
       this.anthropic = new OpenAI({
-        apiKey: 'dummy-key', // Ollama doesn't require a real key
-        baseURL: ollamaBaseUrl
+        apiKey: process.env.OLLAMA_API_KEY || 'dummy-key',
+        baseURL: 'http://localhost:11434/v1'
       });
       this.model = process.env.OLLAMA_MODEL || 'mistral';
       console.log(`  Model: ${this.model}`);
-      console.log(`  Base URL: ${ollamaBaseUrl}`);
+      console.log(`  Base URL: http://localhost:11434/v1`);
     } else if (this.useGemini) {
       console.log('💎 Using Google Gemini API');
       this.geminiClient = new OpenAI({
-        apiKey: process.env.GEMINI_API_KEY,
+        apiKey: process.env.GOOGLE_GEMINI_API_KEY,
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/'
       });
-      this.model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+      this.model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite';
       console.log(`  Model: ${this.model}`);
     } else {
       console.log('🔑 Using Anthropic Claude API');
@@ -86,72 +85,98 @@ export class AgentRunner {
   }
 
   /**
-   * Convert Anthropic format to OpenAI format for Ollama
-   * Ollama uses OpenAI's chat.completion format
+   * Convert Anthropic format to OpenAI format for Ollama.
+   * Ollama (OpenAI-compatible) supports the same format as Gemini.
    */
   convertParamsForOllama(params) {
-    const converted = {
-      model: this.model,
-      messages: params.messages,
-      max_tokens: params.max_tokens || 8000,
-      temperature: params.temperature,
-    };
-    
-    // Note: Most Ollama models don't support function calling/tools
-    // If tools are provided, log a warning but don't include them
-    if (params.tools && params.tools.length > 0) {
-      console.log('⚠️  Warning: Ollama models have limited tool-calling support. Tools may not work as expected.');
-    }
-    
-    return converted;
+    return this.convertParamsForGemini(params);
   }
 
   /**
-   * Convert OpenAI response to Anthropic format for compatibility
+   * Convert OpenAI response to Anthropic format for Ollama.
+   * Handles both text responses and tool_calls (function calling).
    */
   convertResponseFromOllama(openaiResponse) {
-    // Convert OpenAI response format to Anthropic-compatible format
-    const content = [];
-    
-    if (openaiResponse.choices && openaiResponse.choices[0]) {
-      const choice = openaiResponse.choices[0];
-      if (choice.message && choice.message.content) {
-        content.push({
-          type: 'text',
-          text: choice.message.content
-        });
-      }
-    }
-    
-    return {
-      id: openaiResponse.id,
-      type: 'message',
-      role: 'assistant',
-      content: content,
-      model: openaiResponse.model,
-      stop_reason: openaiResponse.choices?.[0]?.finish_reason || 'end_turn',
-      stop_sequence: null,
-      usage: {
-        input_tokens: openaiResponse.usage?.prompt_tokens || 0,
-        output_tokens: openaiResponse.usage?.completion_tokens || 0
-      }
-    };
+    return this.convertResponseFromGemini(openaiResponse);
   }
 
   /**
-   * Convert Anthropic format to OpenAI format for Gemini
-   * Gemini uses OpenAI's chat.completion format via its compatibility endpoint
+   * Convert Anthropic format to OpenAI format for Gemini.
+   * Handles:
+   *   - params.system (Anthropic array) → { role: 'system' } message
+   *   - assistant messages with tool_use blocks → tool_calls
+   *   - user messages with tool_result blocks → { role: 'tool' } messages
    */
   convertParamsForGemini(params) {
+    const messages = [];
+
+    // 1. Convert Anthropic system param → OpenAI system message
+    if (params.system) {
+      const systemText = Array.isArray(params.system)
+        ? params.system.map(b => b.text || '').join('\n')
+        : (typeof params.system === 'string' ? params.system : '');
+      if (systemText) {
+        messages.push({ role: 'system', content: systemText });
+      }
+    }
+
+    // 2. Convert each message from Anthropic format to OpenAI format
+    for (const msg of (params.messages || [])) {
+      if (msg.role === 'assistant') {
+        if (Array.isArray(msg.content)) {
+          const textBlocks  = msg.content.filter(b => b.type === 'text');
+          const toolUseBlocks = msg.content.filter(b => b.type === 'tool_use');
+          const converted = { role: 'assistant', content: null };
+          if (textBlocks.length > 0) {
+            converted.content = textBlocks.map(b => b.text).join('\n');
+          }
+          if (toolUseBlocks.length > 0) {
+            converted.tool_calls = toolUseBlocks.map(b => ({
+              id: b.id,
+              type: 'function',
+              function: { name: b.name, arguments: JSON.stringify(b.input) }
+            }));
+          }
+          messages.push(converted);
+        } else {
+          messages.push({ role: 'assistant', content: msg.content });
+        }
+      } else if (msg.role === 'user') {
+        if (Array.isArray(msg.content)) {
+          const toolResults = msg.content.filter(b => b.type === 'tool_result');
+          const textBlocks  = msg.content.filter(b => b.type === 'text');
+          // tool_result → { role: 'tool' } (one message per result)
+          for (const tr of toolResults) {
+            let content;
+            if (typeof tr.content === 'string') {
+              content = tr.content;
+            } else if (Array.isArray(tr.content)) {
+              content = tr.content.map(b => b.text || JSON.stringify(b)).join('\n');
+            } else {
+              content = JSON.stringify(tr.content);
+            }
+            messages.push({ role: 'tool', tool_call_id: tr.tool_use_id, content });
+          }
+          // Plain text blocks stay as a user message
+          if (textBlocks.length > 0) {
+            messages.push({ role: 'user', content: textBlocks.map(b => b.text).join('\n') });
+          }
+        } else {
+          messages.push({ role: 'user', content: msg.content });
+        }
+      } else {
+        messages.push(msg);
+      }
+    }
+
     const converted = {
       model: this.model,
-      messages: params.messages,
+      messages,
       max_tokens: params.max_tokens || 8000,
       temperature: params.temperature,
     };
 
-    // Gemini supports function calling via its OpenAI-compatible API
-    // but the tool format needs to match OpenAI's function calling format
+    // 3. Convert Anthropic tool schemas → OpenAI function schemas
     if (params.tools && params.tools.length > 0) {
       converted.tools = params.tools.map(tool => ({
         type: 'function',
@@ -167,18 +192,32 @@ export class AgentRunner {
   }
 
   /**
-   * Convert OpenAI/Gemini response to Anthropic format for compatibility
+   * Convert OpenAI/Gemini response to Anthropic format.
+   * Handles both text responses and tool_calls (function calling).
    */
   convertResponseFromGemini(openaiResponse) {
     const content = [];
+    let stopReason = 'end_turn';
 
     if (openaiResponse.choices && openaiResponse.choices[0]) {
       const choice = openaiResponse.choices[0];
-      if (choice.message && choice.message.content) {
-        content.push({
-          type: 'text',
-          text: choice.message.content
-        });
+      const message = choice.message;
+
+      // Plain text content
+      if (message?.content) {
+        content.push({ type: 'text', text: message.content });
+      }
+
+      // Tool calls → Anthropic tool_use blocks
+      if (choice.finish_reason === 'tool_calls' && message?.tool_calls?.length > 0) {
+        for (const tc of message.tool_calls) {
+          let input = {};
+          try { input = JSON.parse(tc.function.arguments); } catch { input = { _raw: tc.function.arguments }; }
+          content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input });
+        }
+        stopReason = 'tool_use';
+      } else {
+        stopReason = choice.finish_reason === 'stop' ? 'end_turn' : (choice.finish_reason || 'end_turn');
       }
     }
 
@@ -186,9 +225,9 @@ export class AgentRunner {
       id: openaiResponse.id,
       type: 'message',
       role: 'assistant',
-      content: content,
+      content,
       model: openaiResponse.model,
-      stop_reason: openaiResponse.choices?.[0]?.finish_reason || 'end_turn',
+      stop_reason: stopReason,
       stop_sequence: null,
       usage: {
         input_tokens: openaiResponse.usage?.prompt_tokens || 0,
@@ -226,10 +265,11 @@ export class AgentRunner {
           response = await this.anthropic.messages.create(params);
         }
 
-        // Track token usage (use actual input tokens from response)
+        // Track token usage (input + output — Anthropic rate limits count both)
         if (response.usage) {
           const inputTokens = response.usage.input_tokens || 0;
-          this.rateLimiter.trackTokenUsage(inputTokens);
+          const outputTokens = response.usage.output_tokens || 0;
+          this.rateLimiter.trackTokenUsage(inputTokens + outputTokens);
           this.rateLimiter.resetConsecutiveErrors();
         }
 
@@ -246,11 +286,14 @@ export class AgentRunner {
                                  errorMessage.includes('would exceed the rate limit');
 
         // Check if it's a "prompt too long" error
+        // NOTE: do NOT match on errorType === INVALID_REQUEST_ERROR alone — that is too broad
+        // and would incorrectly catch unrelated 400 errors (e.g. "messages: at least one message
+        // is required"), triggering the truncation retry and the reference-clearing bug.
         const isPromptTooLong = error.status === HTTP_STATUS.BAD_REQUEST &&
-                                (errorType === ERROR_TYPES.INVALID_REQUEST_ERROR ||
-                                 errorMessage.includes('prompt is too long') ||
+                                (errorMessage.includes('prompt is too long') ||
                                  errorMessage.includes('too long') ||
-                                 errorMessage.includes('maximum'));
+                                 errorMessage.includes('maximum') ||
+                                 errorMessage.includes('token'));
 
         if (isPromptTooLong) {
           console.error(`❌ Prompt too long error: ${error.error?.message || errorMessage}`);
@@ -602,13 +645,12 @@ export class AgentRunner {
       messages[0].content = userContent;
     }
 
-    const systemMessage = [
-      {
-        type: "text",
-        text: systemText,
-        cache_control: { type: "ephemeral" }
-      }
-    ];
+    // Prompt caching (cache_control) requires models that support it.
+    // claude-3-haiku-20240307 does not support the array system message format.
+    const modelSupportsCaching = !this.model.startsWith('claude-3-haiku');
+    const systemMessage = modelSupportsCaching
+      ? [{ type: "text", text: systemText, cache_control: { type: "ephemeral" } }]
+      : systemText;
 
     // Final validation - check if we're still over limit after truncation
     const finalSystemTokens = Math.ceil(systemText.length / TOKEN_LIMITS.CHARS_PER_TOKEN);
@@ -864,7 +906,9 @@ export class AgentRunner {
         usage: response.usage,
         executionTimeMs,
         executionTimeSec,
-        executionTimeMin
+        executionTimeMin,
+        llmBackend: this.useOllama ? 'Ollama' : this.useGemini ? 'Gemini' : 'Claude',
+        llmModel: this.model
       };
       
       // Include agent-specific parameters in result for reporting
@@ -927,7 +971,9 @@ export class AgentRunner {
         agentName,
         success: false,
         error: errorMessage,
-        errorDetails: isRateLimitError ? 'Rate limit error' : undefined
+        errorDetails: isRateLimitError ? 'Rate limit error' : undefined,
+        llmBackend: this.useOllama ? 'Ollama' : this.useGemini ? 'Gemini' : 'Claude',
+        llmModel: this.model
       };
     }
   }
@@ -940,6 +986,7 @@ export class AgentRunner {
     console.log('[AgentRunner] buildContextMessage called with dateRange:', this.dateRange, 'agentName:', agentName);
     const today = new Date();
     const todayISO = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+    const currentISOWeek = getISOWeekNumber(today);
 
     // Get default days from config, default to 7 if not specified (weekly-recap and business-pulse use 5 days)
     let defaultDays = this.config?.settings?.defaultDays || 7;
@@ -1204,6 +1251,7 @@ ${(() => {
 
 ## Dates (CRITICAL)
 **Current Date/Time**: Today is ${todayISO}. The current date and time information is already provided here - DO NOT call any date/time retrieval tools (like get_current_time or similar).
+**Current ISO Calendar Week**: Week ${currentISOWeek} of ${today.getFullYear()} (use this when looking for OneNote weekly pages, e.g., "Week ${currentISOWeek}" or "Week ${currentISOWeek}, ${today.getFullYear()}").
 **Analysis Period**: Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date range (period) from ${startDateISO} to ${endDateISO} (includes both start and end dates). When querying data sources, use parameters like after: "${startDateISO}" (inclusive) and before: "${endDateISO}" or onOrBefore: "${endDateISO}" (depending on API) to query data within this period.${threeDaysAgoISO ? ` For "last 3 days", use "${threeDaysAgoISO}".` : ''}`;
   }
 

@@ -132,6 +132,21 @@ function ReportList({ reports, onReportSelect }) {
                     ${report.cost.toFixed(4)}
                   </span>
                 )}
+                {report.llm && (
+                  <span
+                    className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${
+                      report.llm.startsWith('Gemini')
+                        ? 'text-purple-700 bg-purple-50 border-purple-200'
+                        : report.llm.startsWith('Ollama')
+                        ? 'text-amber-700 bg-amber-50 border-amber-200'
+                        : 'text-blue-700 bg-blue-50 border-blue-200'
+                    }`}
+                    title={report.llm}
+                  >
+                    {report.llm.startsWith('Gemini') ? '💎' : report.llm.startsWith('Ollama') ? '🦙' : '🔑'}{' '}
+                    {report.llm.split(' (')[0]}
+                  </span>
+                )}
                 {hasNotes(report.filename) && (
                   <span className="inline-flex items-center text-xs text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200" title="Has evaluation notes">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

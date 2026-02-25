@@ -58,8 +58,10 @@ export class MessageTruncator {
    */
   truncateMessages(messages, maxTokens = TOKEN_LIMITS.MAX_PROMPT_TOKENS, tools = []) {
     // Always keep the first message (instructions)
+    // Return a copy (not the original reference) to avoid the caller mutating
+    // both arrays when it does params.messages.length = 0 in the retry logic.
     if (messages.length <= 1) {
-      return messages;
+      return [...messages];
     }
 
     const firstMessage = messages[0];
