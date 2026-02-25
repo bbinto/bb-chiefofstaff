@@ -29,6 +29,26 @@ export const PRICING = {
   OUTPUT_TOKENS_PER_MILLION: 15.00, // $15 per 1M output tokens
 };
 
+// Environmental Impact (Carbon Footprint)
+// Based on research: ~1-2g CO2e per 1k tokens for LLM inference
+// Using conservative estimate for Claude Sonnet 4.5 inference
+export const ENVIRONMENTAL_IMPACT = {
+  // Carbon emissions per 1k tokens (in grams CO2 equivalent)
+  INPUT_TOKENS_CO2_PER_1K: 1.5,   // Conservative estimate: 1.5g CO2e per 1k input tokens
+  OUTPUT_TOKENS_CO2_PER_1K: 2.0,  // Output tokens typically require more compute: 2.0g CO2e per 1k tokens
+  
+  // Reference: Average US electricity grid emissions factor (for context)
+  GRID_CO2_PER_KWH: 379, // grams CO2e per kWh (EPA 2023 average)
+  
+  // For context/comparison: common activities
+  TREE_DAYS_PER_KG_CO2: 10, // One tree absorbs ~1kg CO2 per ~100 days, so ~10 days per kg CO2
+  
+  // Environmental impact thresholds for color coding (in grams CO2e)
+  THRESHOLD_GREEN_MAX: 10,   // Green: < 10g CO2e (low impact)
+  THRESHOLD_YELLOW_MAX: 50,  // Yellow: 10-50g CO2e (moderate impact)
+  // Orange: > 50g CO2e (high impact)
+};
+
 // Rate Limiting Configuration
 export const RATE_LIMITING = {
   MIN_DELAY_BETWEEN_CALLS: 5000,    // 5 seconds minimum
@@ -67,6 +87,24 @@ export const MCP_DEFAULTS = {
   CONNECTION_TIMEOUT: 30000,  // 30 seconds
   MAX_RETRIES: 3,
   RETRY_DELAY: 2000,          // 2 seconds initial delay
+};
+
+// Mixpanel Rate Limiting
+// The raw export API has a rate limit of:
+// - 60 queries per hour
+// - 3 queries per second
+// - Maximum 100 concurrent queries
+// - 429 error if exceeded
+export const MIXPANEL_RATE_LIMITS = {
+  QUERIES_PER_HOUR: 60,
+  QUERIES_PER_SECOND: 3,
+  MAX_CONCURRENT_QUERIES: 100,
+  HOUR_WINDOW_MS: 60 * 60 * 1000,  // 1 hour in milliseconds
+  SECOND_WINDOW_MS: 1000,          // 1 second in milliseconds
+  MIN_DELAY_BETWEEN_QUERIES: 334,  // ~3 queries per second = 334ms minimum delay
+  RETRY_MAX_ATTEMPTS: 5,
+  RETRY_INITIAL_BACKOFF: 5000,     // 5 seconds initial backoff on 429
+  RETRY_MAX_BACKOFF: 60000,        // 60 seconds max backoff
 };
 
 // Date Configuration

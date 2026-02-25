@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# Daily Brief Cron Script
+# This script:
+# 1. Generates a daily brief report
+# 2. Creates a light version
+# 3. Generates a podcast from the light version
+
+set -eu
+
+# Set the project directory
+PROJECT_DIR="/home/pi/Documents/GitHub/bb-chiefofstaff"
+cd "$PROJECT_DIR"
+
+# Log file for cron output
+LOG_FILE="$PROJECT_DIR/logs/daily-brief-cron.log"
+mkdir -p "$PROJECT_DIR/logs"
+
+# Function to log with timestamp
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+log "==================================================================="
+log "Starting Daily Brief Workflow"
+log "==================================================================="
+
+# Step 1: Generate the daily brief report
+log "Step 1: Generating daily brief report..."
+OUTPUT=$(npm start daily-brief 2>&1 | tee -a "$LOG_FILE")
+
+# Extract the filename from the output
+# Looking for pattern: "Full report saved to: /path/to/reports/filename.md"
+REPORT_PATH=$(echo "$OUTPUT" | grep -oP 'Full report saved to: \K.*\.md$' | tail -1)
+
+if [ -z "$REPORT_PATH" ]; then
+  log "ERROR: Could not extract report path from output"
+  log "Output was: $OUTPUT"
+  exit 1
+fi
+
+log "Report generated: $REPORT_PATH"
+
+# Extract just the filename without path and extension
+FILENAME=$(basename "$REPORT_PATH" .md)
+log "Extracted filename: $FILENAME"
+
+# Step 2: Create light version
+log "Step 2: Creating light version..."
+if npm run light -- "$FILENAME" 2>&1 | tee -a "$LOG_FILE"; then
+  log "Light version created successfully: ${FILENAME}-light.md"
+else
+  log "ERROR: Failed to create light version"
+  exit 1
+fi
+
+# Step 3: Generate podcast from light version
+log "Step 3: Generating podcast from light version..."
+if sh podcast.sh "${FILENAME}-light" 2>&1 | tee -a "$LOG_FILE"; then
+  log "Podcast created successfully: ${FILENAME}-light.mp3"
+else
+  log "ERROR: Failed to create podcast"
+  exit 1
+fi
+
+log "==================================================================="
+log "Daily Brief Workflow Completed Successfully"
+log "==================================================================="
+log ""

@@ -3,28 +3,129 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { MCP_DEFAULTS } from './utils/constants.js';
+import { MCP_DEFAULTS, MIXPANEL_RATE_LIMITS } from './utils/constants.js';
+import { MixpanelRateLimiter } from './agent/mixpanel-rate-limiter.js';
 
 /**
  * MCP Client Manager
  * Loads and connects to MCP servers configured in Claude Desktop
  */
 export class MCPClientManager {
-  constructor() {
+  constructor(config = null) {
     this.clients = new Map();
     this.tools = new Map();
+    this.config = config; // Store config to inject credentials
     // Configurable timeout settings (in milliseconds)
     this.connectionTimeout = parseInt(process.env.MCP_CONNECTION_TIMEOUT || MCP_DEFAULTS.CONNECTION_TIMEOUT, 10);
     this.maxRetries = parseInt(process.env.MCP_MAX_RETRIES || MCP_DEFAULTS.MAX_RETRIES, 10);
     this.retryDelay = parseInt(process.env.MCP_RETRY_DELAY || MCP_DEFAULTS.RETRY_DELAY, 10);
+    // Mixpanel rate limiter for enforcing Mixpanel API rate limits
+    this.mixpanelRateLimiter = new MixpanelRateLimiter();
+  }
+
+  /**
+   * Get Mixpanel environment variables from config
+   * @param {string} serverName - Name of the MCP server
+   * @returns {object} Environment variables for Mixpanel
+   */
+  getMixpanelEnvVars(serverName) {
+    // Check if this is a Mixpanel MCP server
+    const isMixpanelServer = serverName.toLowerCase().includes('mixpanel');
+    
+    if (!isMixpanelServer || !this.config?.mixpanel) {
+      return {};
+    }
+
+    const mixpanelConfig = this.config.mixpanel;
+    const envVars = {};
+
+    // Inject Mixpanel credentials as environment variables
+    // The Mixpanel MCP server expects these from config.mixpanel in config.json
+    // Common environment variable names that Mixpanel MCP servers might use:
+    if (mixpanelConfig.projectId) {
+      // Primary: Most common naming convention
+      envVars.MIXPANEL_PROJECT_ID = mixpanelConfig.projectId;
+      // Alternatives: Different MCP servers might use different names
+      envVars.MIXPANEL_PROJECTID = mixpanelConfig.projectId;
+      envVars.PROJECT_ID = mixpanelConfig.projectId;
+      envVars.MIXPANEL_PROJECT = mixpanelConfig.projectId;
+      // Handle the placeholder replacement case
+      envVars.__CONFIG_projectId__ = mixpanelConfig.projectId;
+    }
+
+    if (mixpanelConfig.username) {
+      envVars.MIXPANEL_USERNAME = mixpanelConfig.username;
+      envVars.MIXPANEL_USER = mixpanelConfig.username;
+      envVars.USERNAME = mixpanelConfig.username;
+      envVars.__CONFIG_username__ = mixpanelConfig.username;
+    }
+
+    if (mixpanelConfig.pwd) {
+      envVars.MIXPANEL_PASSWORD = mixpanelConfig.pwd;
+      envVars.MIXPANEL_PWD = mixpanelConfig.pwd;
+      envVars.MIXPANEL_SECRET = mixpanelConfig.pwd;
+      envVars.PASSWORD = mixpanelConfig.pwd;
+      envVars.__CONFIG_pwd__ = mixpanelConfig.pwd;
+    }
+
+    // Also set config path variables that some MCP servers might use
+    if (this.config) {
+      const configPath = path.join(process.cwd(), 'config.json');
+      envVars.CONFIG_PATH = configPath;
+      envVars.MIXPANEL_CONFIG_PATH = configPath;
+    }
+
+    if (Object.keys(envVars).length > 0) {
+      console.log(`  📝 Injecting Mixpanel credentials for ${serverName}`);
+      console.log(`     Project ID: ${mixpanelConfig.projectId || 'Not set'}`);
+    }
+
+    return envVars;
   }
 
   /**
    * Load MCP configuration from Claude Desktop config
    */
   loadMCPConfig() {
-    const configPath = process.env.MCP_CONFIG_PATH ||
-      path.join(os.homedir(), 'Library/Application Support/Claude/claude_desktop_config.json');
+    // Determine the correct path based on the platform
+    let configPath = process.env.MCP_CONFIG_PATH;
+    
+    if (!configPath) {
+      const platform = process.platform;
+      const homeDir = os.homedir();
+      
+      if (platform === 'darwin') {
+        // macOS
+        configPath = path.join(homeDir, 'Library/Application Support/Claude/claude_desktop_config.json');
+      } else if (platform === 'linux') {
+        // Linux - try both .config/Claude and .config/claude
+        const linuxPaths = [
+          path.join(homeDir, '.config/Claude/claude_desktop_config.json'),
+          path.join(homeDir, '.config/claude/claude_desktop_config.json')
+        ];
+        for (const p of linuxPaths) {
+          if (fs.existsSync(p)) {
+            configPath = p;
+            break;
+          }
+        }
+        // If neither exists, default to the first one
+        if (!configPath) {
+          configPath = linuxPaths[0];
+        }
+      } else if (platform === 'win32') {
+        // Windows
+        const appData = process.env.APPDATA;
+        if (appData) {
+          configPath = path.join(appData, 'Claude/claude_desktop_config.json');
+        } else {
+          configPath = path.join(homeDir, 'AppData/Roaming/Claude/claude_desktop_config.json');
+        }
+      } else {
+        // Fallback for other platforms
+        configPath = path.join(homeDir, '.config/Claude/claude_desktop_config.json');
+      }
+    }
 
     try {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -127,10 +228,13 @@ export class MCPClientManager {
   async connectToServer(serverName, serverConfig) {
     const { command, args = [], env = {} } = serverConfig;
 
+    // Inject Mixpanel credentials from config if this is a Mixpanel MCP server
+    const mixpanelEnv = this.getMixpanelEnvVars(serverName);
+    
     const transport = new StdioClientTransport({
       command,
       args,
-      env: { ...process.env, ...env }
+      env: { ...process.env, NODE_NO_WARNINGS: '1', ...env, ...mixpanelEnv }
     });
 
     const client = new Client({
@@ -171,18 +275,78 @@ export class MCPClientManager {
       // If listing tools fails, remove the client but don't throw
       // (connection succeeded but tool listing failed)
       this.clients.delete(serverName);
+      
+      // Provide more detailed error information for debugging
+      const errorDetails = {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        code: error.code
+      };
+      
+      // Check if this is a remote server error (mcp-remote package)
+      const isRemoteError = (error.message && (
+        error.message.includes('mcp-remote') || 
+        error.message.includes('remote server') ||
+        error.message.includes('Error from remote server')
+      )) || (error.stack && error.stack.includes('mcp-remote'));
+      
+      if (isRemoteError) {
+        console.error(`\n⚠️  Remote MCP server error for ${serverName}:`);
+        console.error(`   This appears to be a remote server connection issue.`);
+        console.error(`   Error: ${error.message}`);
+        console.error(`   Check your remote server configuration and network connectivity.`);
+        console.error(`   The remote server may be returning an invalid response format.`);
+      }
+      
       throw new Error(`MCP error -32001: Request timed out - Failed to list tools: ${error.message}`);
     }
 
-    toolsList.tools.forEach(tool => {
-      this.tools.set(tool.name, { serverName, client, schema: tool });
+    // Validate toolsList response structure
+    if (!toolsList) {
+      this.clients.delete(serverName);
+      throw new Error(`MCP error: Received undefined response from ${serverName} when listing tools`);
+    }
+
+    // Handle different response formats
+    const tools = toolsList.tools || toolsList || [];
+    if (!Array.isArray(tools)) {
+      this.clients.delete(serverName);
+      throw new Error(`MCP error: Invalid tools response format from ${serverName}. Expected array, got ${typeof tools}`);
+    }
+
+    // Register tools with error handling for individual tools
+    let registeredCount = 0;
+    const errors = [];
+    tools.forEach(tool => {
+      try {
+        if (!tool || !tool.name) {
+          console.warn(`  ⚠️  Skipping invalid tool from ${serverName}: missing name property`);
+          return;
+        }
+        this.tools.set(tool.name, { serverName, client, schema: tool });
+        registeredCount++;
+      } catch (error) {
+        errors.push(`Tool registration error: ${error.message}`);
+        console.warn(`  ⚠️  Failed to register tool from ${serverName}: ${error.message}`);
+      }
     });
 
-    console.log(`  ✓ Connected to ${serverName}: ${toolsList.tools.length} tools available`);
+    if (registeredCount === 0 && tools.length > 0) {
+      // All tools failed to register
+      this.clients.delete(serverName);
+      throw new Error(`MCP error: Failed to register any tools from ${serverName}. Errors: ${errors.join('; ')}`);
+    }
+
+    if (errors.length > 0) {
+      console.warn(`  ⚠️  ${serverName}: Registered ${registeredCount}/${tools.length} tools (${errors.length} failed)`);
+    } else {
+      console.log(`  ✓ Connected to ${serverName}: ${registeredCount} tools available`);
+    }
   }
 
   /**
-   * Call an MCP tool
+   * Call an MCP tool with rate limiting for Mixpanel tools
    */
   async callTool(toolName, args = {}) {
     // Debug: Log tool name details
@@ -200,6 +364,9 @@ export class MCPClientManager {
       throw new Error(`Tool ${toolName} not found. Available tools: ${Array.from(this.tools.keys()).join(', ')}`);
     }
 
+    // Check if this is a Mixpanel tool
+    const isMixpanel = this.isMixpanelTool(toolName, toolInfo.serverName);
+
     // Log JQL queries for Jira tools
     if (this.isJiraTool(toolName, toolInfo.serverName)) {
       const jql = args.jql || args.query || args.jqlQuery;
@@ -211,15 +378,63 @@ export class MCPClientManager {
       }
     }
 
-    const { client } = toolInfo;
-    const result = await client.callTool({ name: toolName, arguments: args });
-
-    // Log results for Jira tools
-    if (this.isJiraTool(toolName, toolInfo.serverName)) {
-      this.logJiraResults(toolName, result);
+    // Log Mixpanel tool calls
+    if (isMixpanel) {
+      console.log(`\n[Mixpanel Tool] ${toolName} - Applying rate limiting...`);
     }
 
-    return result;
+    const { client } = toolInfo;
+
+    // For Mixpanel tools, use rate limiting with retry logic for 429 errors
+    if (isMixpanel) {
+      let lastError = null;
+      
+      for (let attempt = 0; attempt < MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS; attempt++) {
+        try {
+          // Use rate limiter to wrap the tool call
+          const result = await this.mixpanelRateLimiter.withRateLimit(
+            () => client.callTool({ name: toolName, arguments: args }),
+            toolName
+          );
+
+          // Log results for Mixpanel tools
+          console.log(`[Mixpanel Tool] ${toolName} completed successfully`);
+
+          return result;
+        } catch (error) {
+          lastError = error;
+          
+          // Check if it's a 429 error
+          if (this.mixpanelRateLimiter.is429Error(error)) {
+            if (attempt < MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS - 1) {
+              // Handle 429 with exponential backoff
+              await this.mixpanelRateLimiter.handle429Error(attempt);
+              continue; // Retry
+            } else {
+              // Out of retries
+              console.error(`[Mixpanel Tool] ${toolName} failed after ${MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS} attempts due to rate limiting`);
+              throw new Error(`Mixpanel rate limit exceeded after ${MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS} retries: ${error.message}`);
+            }
+          } else {
+            // Not a 429 error, re-throw immediately
+            throw error;
+          }
+        }
+      }
+      
+      // Should not reach here, but handle it just in case
+      throw lastError || new Error(`Failed to call ${toolName} after ${MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS} attempts`);
+    } else {
+      // For non-Mixpanel tools, call directly without rate limiting
+      const result = await client.callTool({ name: toolName, arguments: args });
+
+      // Log results for Jira tools
+      if (this.isJiraTool(toolName, toolInfo.serverName)) {
+        this.logJiraResults(toolName, result);
+      }
+
+      return result;
+    }
   }
 
   /**
@@ -236,6 +451,27 @@ export class MCPClientManager {
     const serverLower = (serverName || '').toLowerCase();
     
     return jiraIndicators.some(indicator => 
+      nameLower.includes(indicator) || serverLower.includes(indicator)
+    );
+  }
+
+  /**
+   * Check if a tool is a Mixpanel-related tool
+   * @param {string} toolName - Name of the tool
+   * @param {string} serverName - Name of the server
+   * @returns {boolean} True if this is a Mixpanel tool
+   */
+  isMixpanelTool(toolName, serverName) {
+    const mixpanelIndicators = [
+      'mixpanel',
+      'query_mixpanel',
+      'mixpanel_query'
+    ];
+    
+    const nameLower = toolName.toLowerCase();
+    const serverLower = (serverName || '').toLowerCase();
+    
+    return mixpanelIndicators.some(indicator => 
       nameLower.includes(indicator) || serverLower.includes(indicator)
     );
   }

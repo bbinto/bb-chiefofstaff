@@ -80,6 +80,16 @@ export class ToolHandler {
           },
           required: ['filename']
         }
+      },
+      {
+        name: 'get_current_time',
+        description:
+          'Get the current date and time. Returns the current date, time, timestamp, Unix timestamp, and timezone information in multiple formats.',
+        input_schema: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
       }
     );
 
@@ -109,7 +119,32 @@ export class ToolHandler {
       return this.readReportFile(args);
     }
 
+    if (toolName === 'get_current_time') {
+      return this.getCurrentTime();
+    }
+
     throw new Error(`Unknown custom tool: ${toolName}`);
+  }
+
+  /**
+   * Get current date and time
+   * @returns {object} Current date/time info
+   */
+  getCurrentTime() {
+    const now = new Date();
+    const isoString = now.toISOString();
+    const dateOnly = isoString.split('T')[0]; // YYYY-MM-DD
+    const timeOnly = isoString.split('T')[1]; // HH:mm:ss.sssZ
+
+    return {
+      timestamp: isoString,
+      date: dateOnly,
+      time: timeOnly,
+      isoFormat: isoString,
+      unixTimestamp: Math.floor(now.getTime() / 1000),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      message: `Current date and time: ${dateOnly} at ${now.toLocaleTimeString()}`
+    };
   }
 
   /**
@@ -120,10 +155,11 @@ export class ToolHandler {
   async readFileFromManualSources(args) {
     const manualSourcesPath = path.resolve(process.cwd(), PATHS.MANUAL_SOURCES_DIR);
 
-    // If a folder parameter is provided for business-health agent, use it as base path
+    // If a folder parameter is provided (business-health, weekly-recap, etc.), use it as base path
     let basePath = manualSourcesPath;
-    if (this.agentParams.manualSourcesFolder) {
-      basePath = path.resolve(manualSourcesPath, this.agentParams.manualSourcesFolder);
+    const folderParam = this.agentParams.manualSourcesFolder || this.agentParams.folder;
+    if (folderParam) {
+      basePath = path.resolve(manualSourcesPath, folderParam);
     }
 
     const filePath = path.resolve(basePath, args.filename);
@@ -288,11 +324,12 @@ export class ToolHandler {
 
     // If a folder parameter is provided, list only that folder
     let searchPath = manualSourcesPath;
-    if (this.agentParams.manualSourcesFolder) {
-      searchPath = path.resolve(manualSourcesPath, this.agentParams.manualSourcesFolder);
+    const folderParam = this.agentParams.manualSourcesFolder || this.agentParams.folder;
+    if (folderParam) {
+      searchPath = path.resolve(manualSourcesPath, folderParam);
       if (!fs.existsSync(searchPath)) {
         return {
-          error: `Specified folder "${this.agentParams.manualSourcesFolder}" does not exist in manual_sources`,
+          error: `Specified folder "${folderParam}" does not exist in manual_sources`,
           path: searchPath,
           availableFolders: this.listAllDirectoriesRecursive(manualSourcesPath).map(d => d)
         };
@@ -319,9 +356,7 @@ export class ToolHandler {
     }));
 
     return {
-      folder: this.agentParams.manualSourcesFolder
-        ? `manual_sources/${this.agentParams.manualSourcesFolder}`
-        : 'manual_sources',
+      folder: folderParam ? `manual_sources/${folderParam}` : 'manual_sources',
       directories: dirDetails,
       files: fileDetails,
       totalFiles: fileDetails.length,

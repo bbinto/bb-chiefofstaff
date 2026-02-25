@@ -7,6 +7,9 @@
   "scripts": {
     "start": "node src/index.js",
     "test-mcp": "node test-mcp.js",
+    "test-mixpanel": "node test-mixpanel-mcp.js",
+    "fix-mixpanel": "node fix-mixpanel-mcp-config.js",
+    "light": "bash ./light.sh",
     "list": "node src/index.js --list",
     "help": "node src/index.js --help"
   },
@@ -18,10 +21,16 @@
   ],
   "author": "",
   "license": "MIT",
+  "overrides": {
+    "whatwg-url": "^14.0.0",
+    "tr46": "^5.0.0"
+  },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.0",
+    "@anthropic-ai/sdk": "^0.78.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "dotenv": "^16.4.5",
+    "mermaid": "^11.12.2",
+    "openai": "^4.52.0",
     "pdf-parse": "^1.1.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }

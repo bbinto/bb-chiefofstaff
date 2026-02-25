@@ -9,14 +9,283 @@ import { FRONTEND, PATHS } from '../src/utils/constants.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function loadEnvFileIntoProcess(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split(/\r?\n/);
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const cleanedLine = line.startsWith('export ') ? line.slice(7).trim() : line;
+    const equalIndex = cleanedLine.indexOf('=');
+    if (equalIndex <= 0) {
+      continue;
+    }
+
+    const key = cleanedLine.slice(0, equalIndex).trim();
+    if (!key || process.env[key] !== undefined) {
+      continue;
+    }
+
+    let value = cleanedLine.slice(equalIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    process.env[key] = value;
+  }
+}
+
+// Ensure environment variables are loaded for local server usage.
+loadEnvFileIntoProcess(path.join(__dirname, '..', '.env'));
+loadEnvFileIntoProcess(path.join(__dirname, '.env'));
+
 const app = express();
 const PORT = FRONTEND.PORT;
 
 // Password protection configuration
 const APP_PASSWORD = process.env.APP_PASSWORD || null;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
+const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || null;
+
+// LLM Settings - stored in memory (defaults from environment)
+let llmSettings = {
+  useOllama: process.env.USE_OLLAMA === 'true',
+  useGemini: process.env.USE_GEMINI === 'true',
+  ollamaModel: process.env.OLLAMA_MODEL || 'mistral',
+  ollamaBaseUrl: 'http://localhost:11434',
+  ollamaApiKey: process.env.OLLAMA_API_KEY || '',
+  claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite'
+};
+
+function buildLightReportPrompt(filename, reportContent) {
+  return [
+    'You are an executive communications assistant and podcast script writer.',
+    'Create a LIGHT version of the provided report in markdown that sounds natural when read aloud by a text-to-speech engine.',
+    'Focus only on the most important information for executives.',
+    '',
+    'STRICT REQUIREMENTS:',
+    '- Remove token usage, environmental impact, cost, execution metadata, and other operational telemetry.',
+    '- Start directly with key business content (no preamble).',
+    '- Keep it concise, actionable, and easy to scan.',
+    '- Make it TTS-friendly: short sentences, natural punctuation, no emojis, no code blocks, no tables, no raw URLs.',
+    '- Expand uncommon abbreviations on first use when possible and avoid symbol-heavy text.',
+    '- Write in spoken language suitable for a podcast host. Avoid robotic or overly formal phrasing.',
+    '- Use brief transition lines between sections (for example: "Next, the key insights." or "Now, the actions.").',
+    '- Prefer short narration paragraphs and simple numbered actions over dense bullet lists.',
+    '- Keep each section tight: typically 2 to 5 short lines.',
+    '- Include these sections in this order:',
+    '  1) ## One-Line Executive Summary',
+    '  2) ## Most Important Insights',
+    '  3) ## Actions to Take',
+    '  4) ## Risks / Watchouts (if applicable)',
+    '- For "Actions to Take", use numbered items with clear owner-oriented wording.',
+    '- Preserve concrete facts/dates/metrics from the original report when present.',
+    '- Return markdown only.',
+    '',
+    `Original filename: ${filename}`,
+    '',
+    'Original report markdown:',
+    reportContent
+  ].join('\n');
+}
+
+function sanitizeLightReportForTTS(markdown) {
+  if (!markdown || typeof markdown !== 'string') {
+    return '';
+  }
+
+  return markdown
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function extractAnthropicText(data) {
+  if (!data || !Array.isArray(data.content)) {
+    return '';
+  }
+  return data.content
+    .filter((item) => item && item.type === 'text' && typeof item.text === 'string')
+    .map((item) => item.text)
+    .join('\n')
+    .trim();
+}
+
+function extractOllamaText(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  return typeof content === 'string' ? content.trim() : '';
+}
+
+function buildOllamaChatUrl(baseUrl) {
+  const trimmed = String(baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+  return trimmed.endsWith('/v1') ? `${trimmed}/chat/completions` : `${trimmed}/v1/chat/completions`;
+}
+
+async function generateLightReportWithClaude(promptText) {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is not set. Configure Claude API key or switch to Ollama in Settings.');
+  }
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': ANTHROPIC_API_KEY
+    },
+    body: JSON.stringify({
+      model: llmSettings.claudeModel || 'claude-sonnet-4-5-20250929',
+      max_tokens: 3000,
+      temperature: 0.2,
+      messages: [{ role: 'user', content: promptText }]
+    })
+  });
+
+  const responseText = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const err = data?.error?.message || responseText || `Claude request failed with status ${response.status}`;
+    throw new Error(err);
+  }
+
+  const markdown = extractAnthropicText(data);
+  if (!markdown) {
+    throw new Error('Claude returned an empty light report.');
+  }
+
+  return markdown;
+}
+
+async function generateLightReportWithOllama(promptText) {
+  const endpoint = buildOllamaChatUrl(llmSettings.ollamaBaseUrl);
+  const ollamaHeaders = { 'Content-Type': 'application/json' };
+  if (llmSettings.ollamaApiKey) {
+    ollamaHeaders['Authorization'] = `Bearer ${llmSettings.ollamaApiKey}`;
+  }
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: ollamaHeaders,
+    body: JSON.stringify({
+      model: llmSettings.ollamaModel || 'mistral',
+      temperature: 0.2,
+      messages: [{ role: 'user', content: promptText }]
+    })
+  });
+
+  const responseText = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const err = data?.error?.message || data?.error || responseText || `Ollama request failed with status ${response.status}`;
+    throw new Error(err);
+  }
+
+  const markdown = extractOllamaText(data);
+  if (!markdown) {
+    throw new Error('Ollama returned an empty light report.');
+  }
+
+  return markdown;
+}
+
+async function generateLightReportWithGemini(promptText) {
+  if (!GOOGLE_GEMINI_API_KEY) {
+    throw new Error('GOOGLE_GEMINI_API_KEY is not set. Configure Gemini API key in your .env file.');
+  }
+
+  const model = llmSettings.geminiModel || 'gemini-2.0-flash-lite';
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GOOGLE_GEMINI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: [{ role: 'user', content: promptText }]
+      })
+    }
+  );
+
+  const responseText = await response.text();
+  let data = null;
+  try {
+    data = JSON.parse(responseText);
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const err = data?.error?.message || data?.error || responseText || `Gemini request failed with status ${response.status}`;
+    throw new Error(err);
+  }
+
+  const markdown = data?.choices?.[0]?.message?.content || '';
+  if (!markdown) {
+    throw new Error('Gemini returned an empty light report.');
+  }
+
+  return markdown;
+}
+
+async function generateLightReportMarkdown(filename, reportContent) {
+  const promptText = buildLightReportPrompt(filename, reportContent);
+  if (llmSettings.useOllama) {
+    return generateLightReportWithOllama(promptText);
+  }
+
+  if (llmSettings.useGemini) {
+    return generateLightReportWithGemini(promptText);
+  }
+
+  if (ANTHROPIC_API_KEY) {
+    return generateLightReportWithClaude(promptText);
+  }
+
+  try {
+    console.warn('ANTHROPIC_API_KEY not set. Falling back to Ollama for light report generation.');
+    return await generateLightReportWithOllama(promptText);
+  } catch (ollamaError) {
+    throw new Error(`ANTHROPIC_API_KEY is not set and Ollama fallback failed: ${ollamaError.message}`);
+  }
+}
 
 app.use(cors());
 app.use(express.json());
+
+// Track active background executions (podcast jobs, agent runs)
+const activeExecutions = new Map();
 
 // Password protection middleware
 function passwordProtection(req, res, next) {
@@ -30,8 +299,13 @@ function passwordProtection(req, res, next) {
     return next();
   }
 
-  // Check for password in header
-  const providedPassword = req.headers['x-app-password'];
+  // Check for password in header first
+  let providedPassword = req.headers['x-app-password'];
+  
+  // Also check query parameter (for SSE which can't send headers)
+  if (!providedPassword) {
+    providedPassword = req.query.password;
+  }
 
   if (providedPassword === APP_PASSWORD) {
     return next();
@@ -47,11 +321,50 @@ function passwordProtection(req, res, next) {
 // Apply password protection to all routes except static files
 app.use(passwordProtection);
 
-// Path to reports folder (one level up from frontend)
-const REPORTS_DIR = path.join(__dirname, '..', PATHS.REPORTS_DIR);
+// Debug: Log all requests (useful for Vercel debugging)
+if (process.env.VERCEL === '1') {
+  app.use((req, res, next) => {
+    console.log(`[Vercel Debug] ${req.method} ${req.path}`);
+    next();
+  });
+}
 
-// Path to config.json (one level up from frontend)
-const CONFIG_PATH = path.join(__dirname, '..', 'config.json');
+// Path to reports folder - use frontend/reports for Vercel, fallback to parent for local
+const REPORTS_DIR = process.env.VERCEL === '1' 
+  ? path.join(__dirname, 'reports')
+  : path.join(__dirname, '..', PATHS.REPORTS_DIR);
+
+// Path to config.json - use frontend/config.json for Vercel, fallback to parent for local
+// On Vercel, config can come from APP_CONFIG_JSON environment variable (as JSON string)
+const CONFIG_PATH = process.env.VERCEL === '1'
+  ? path.join(__dirname, 'config.json')
+  : path.join(__dirname, '..', 'config.json');
+
+// Helper function to load config (from file or environment variable)
+function loadConfig() {
+  // On Vercel, try environment variable first
+  if (process.env.VERCEL === '1' && process.env.APP_CONFIG_JSON) {
+    try {
+      return JSON.parse(process.env.APP_CONFIG_JSON);
+    } catch (error) {
+      console.error('Error parsing APP_CONFIG_JSON environment variable:', error);
+      // Fall back to file if env var is invalid
+    }
+  }
+  
+  // Fall back to reading from file
+  if (fs.existsSync(CONFIG_PATH)) {
+    try {
+      const configContent = fs.readFileSync(CONFIG_PATH, 'utf-8');
+      return JSON.parse(configContent);
+    } catch (error) {
+      console.error('Error reading config file:', error);
+      throw error;
+    }
+  }
+  
+  return null;
+}
 
 // Serve static files from dist folder if it exists (production build)
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -71,6 +384,7 @@ app.get('/', (req, res) => {
     <!DOCTYPE html>
     <html>
       <head>
+        
         <title>Chief of Staff API Server</title>
         <style>
           body {
@@ -141,15 +455,34 @@ function extractCost(content) {
 
 /**
  * Extract execution time from report content
- * Looks for pattern: **Execution Time**: X.XXs
+ * Looks for pattern: **Execution Time**: X.XX min or X.XXs (for backward compatibility)
+ * Returns value in minutes
  */
 function extractExecutionTime(content) {
-  const execTimeRegex = /\*\*Execution Time\*\*:\s*(\d+\.?\d*)s/;
-  const match = content.match(execTimeRegex);
-  if (match && match[1]) {
-    return parseFloat(match[1]);
+  // Try minutes format first (new format)
+  const execTimeMinRegex = /\*\*Execution Time\*\*:\s*(\d+\.?\d*)\s*min/;
+  const minMatch = content.match(execTimeMinRegex);
+  if (minMatch && minMatch[1]) {
+    return parseFloat(minMatch[1]);
   }
+  
+  // Fall back to seconds format (old format) and convert to minutes
+  const execTimeSecRegex = /\*\*Execution Time\*\*:\s*(\d+\.?\d*)s/;
+  const secMatch = content.match(execTimeSecRegex);
+  if (secMatch && secMatch[1]) {
+    return parseFloat(secMatch[1]) / 60;
+  }
+  
   return null;
+}
+
+/**
+ * Extract LLM info from report content
+ * Looks for pattern: **LLM**: Backend (model)
+ */
+function extractLLM(content) {
+  const match = content.match(/\*\*LLM\*\*:\s*(.+)/);
+  return match ? match[1].trim() : null;
 }
 
 // Get all reports
@@ -194,6 +527,7 @@ app.get('/api/reports', (req, res) => {
         let insights = [];
         let cost = null;
         let executionTime = null;
+        let llm = null;
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
           oneLineSummary = extractOneLineSummary(content);
@@ -204,6 +538,7 @@ app.get('/api/reports', (req, res) => {
           // Extract cost and execution time from content
           cost = extractCost(content);
           executionTime = extractExecutionTime(content);
+          llm = extractLLM(content);
         } catch (err) {
           console.error(`Error reading ${file} for summary:`, err.message);
         }
@@ -219,7 +554,8 @@ app.get('/api/reports', (req, res) => {
           oneLineSummary,
           insights,
           cost,
-          executionTime
+          executionTime,
+          llm
         };
       })
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -249,6 +585,52 @@ app.get('/api/reports/:filename', (req, res) => {
   }
 });
 
+// Create a light version of a report using AI and save it to reports folder
+app.post('/api/reports/:filename/light', async (req, res) => {
+  try {
+    const filename = req.params.filename;
+
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    if (!filename.toLowerCase().endsWith('.md')) {
+      return res.status(400).json({ error: 'Only markdown reports can be lightened' });
+    }
+
+    const sourcePath = path.join(REPORTS_DIR, filename);
+    if (!fs.existsSync(sourcePath)) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
+    const lightContentRaw = await generateLightReportMarkdown(filename, sourceContent);
+    const lightContent = sanitizeLightReportForTTS(lightContentRaw);
+
+    if (!lightContent) {
+      throw new Error('Generated light report is empty after TTS cleanup');
+    }
+
+    const sourceBaseName = path.parse(filename).name;
+    const targetBaseName = sourceBaseName.endsWith('-light') ? sourceBaseName : `${sourceBaseName}-light`;
+    const targetFilename = `${targetBaseName}.md`;
+    const targetPath = path.join(REPORTS_DIR, targetFilename);
+
+    fs.writeFileSync(targetPath, lightContent.trim() + '\n', 'utf-8');
+
+    console.log('Light report created:', targetPath);
+    res.json({
+      success: true,
+      message: 'Light report created successfully',
+      filename: targetFilename,
+      path: targetPath
+    });
+  } catch (error) {
+    console.error('Error creating light report:', error);
+    res.status(500).json({ error: 'Failed to create light report', details: error.message });
+  }
+});
+
 // Delete a specific report
 app.delete('/api/reports/:filename', (req, res) => {
   try {
@@ -268,13 +650,223 @@ app.delete('/api/reports/:filename', (req, res) => {
       return res.status(404).json({ error: 'Report not found' });
     }
 
-    // Delete the file
+    // Delete the report file
     fs.unlinkSync(filePath);
     console.log('File deleted successfully:', filePath);
-    res.json({ success: true, message: 'Report deleted successfully' });
+
+    // Also delete the corresponding MP3 file if it exists (same folder as the report)
+    const baseName = path.parse(filename).name;
+    const normalizedExpectedMp3Name = `${baseName}.mp3`.normalize('NFC').toLowerCase();
+    const mp3Candidates = fs.readdirSync(REPORTS_DIR)
+      .filter((entry) => {
+        if (path.extname(entry).toLowerCase() !== '.mp3') {
+          return false;
+        }
+        return entry.normalize('NFC').toLowerCase() === normalizedExpectedMp3Name;
+      })
+      .map((entry) => path.join(REPORTS_DIR, entry));
+
+    const deletedMp3Files = [];
+    for (const mp3Path of mp3Candidates) {
+      try {
+        fs.unlinkSync(mp3Path);
+        deletedMp3Files.push(mp3Path);
+        console.log('MP3 file deleted successfully:', mp3Path);
+      } catch (mp3Error) {
+        console.warn('Warning: Could not delete MP3 file:', mp3Path, mp3Error.message);
+      }
+    }
+
+    if (deletedMp3Files.length === 0) {
+      const expectedMp3Path = path.join(REPORTS_DIR, `${baseName}.mp3`);
+      console.log('No corresponding MP3 file found:', expectedMp3Path);
+    }
+
+    res.json({
+      success: true,
+      message: 'Report deleted successfully',
+      deletedAudioFiles: deletedMp3Files.map(file => path.basename(file))
+    });
   } catch (error) {
     console.error('Error deleting report:', error);
     res.status(500).json({ error: 'Failed to delete report', details: error.message });
+  }
+});
+
+
+
+// Create a podcast from a markdown report (starts conversion and returns executionId)
+app.post('/api/reports/:filename/podcast', async (req, res) => {
+  try {
+    const filename = req.params.filename;
+
+    // Security check: prevent path traversal
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const filePath = path.join(REPORTS_DIR, filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // Load config to find md2podcast path (optional)
+    const config = loadConfig();
+    const md2podcastPath = process.env.MD2PODCAST_PATH || config?.md2podcastPath || null;
+
+    if (!md2podcastPath) {
+      return res.status(400).json({ error: 'md2podcast path not configured. Set MD2PODCAST_PATH or md2podcastPath in config.json' });
+    }
+
+    // Validate output path
+    const baseName = filename.replace(/\.md$/i, '');
+    const outFilename = `${baseName}.mp3`;
+    const outPath = path.join(REPORTS_DIR, outFilename);
+
+    // Build command args. If md2podcast is a .py file, use python3 to run it.
+    const args = [];
+    let cmd = md2podcastPath;
+    if (md2podcastPath.endsWith('.py')) {
+      cmd = 'python3';
+      args.push(md2podcastPath);
+    }
+
+    // Default args: input file and output file (positional for md2podcast)
+    args.push(filePath);
+    args.push(outPath);
+
+    // Determine engine/voice/rate: prefer request body, then env vars, then config, then sensible defaults
+    const engine = req.body?.engine || process.env.MD2PODCAST_ENGINE || config?.md2podcastEngine || 'edge';
+    if (engine) {
+      args.push('--engine', engine);
+    }
+
+    const voice = req.body?.voice || process.env.MD2PODCAST_VOICE || config?.md2podcastVoice || '';
+    if (voice) {
+      args.push('--voice', voice);
+    }
+
+    // Normalize rate for different engines. `edge` expects a signed percentage string like +10% or -10%.
+    const rawRate = req.body?.rate ?? process.env.MD2PODCAST_RATE ?? config?.md2podcastRate ?? null;
+    if (rawRate !== null && rawRate !== undefined && rawRate !== '') {
+      let rateArg = null;
+      // If engine is 'edge', convert numeric rates (1.0 = +0%) to signed percentage strings
+      if (String(engine).toLowerCase() === 'edge') {
+        const maybeNumber = Number(rawRate);
+        if (!Number.isNaN(maybeNumber)) {
+          const percent = Math.round((maybeNumber - 1.0) * 100);
+          const sign = percent >= 0 ? '+' : '';
+          rateArg = `${sign}${percent}%`;
+        } else if (/^[+-]?\d+%$/.test(String(rawRate))) {
+          // Already a percentage string
+          rateArg = String(rawRate).startsWith('+') || String(rawRate).startsWith('-') ? String(rawRate) : `+${String(rawRate)}`;
+        }
+      } else {
+        // For other engines, pass the raw value as-is (string)
+        rateArg = String(rawRate);
+      }
+
+      if (rateArg) {
+        args.push('--rate', rateArg);
+      }
+    }
+
+    // Spawn the process and track execution in activeExecutions
+    const { spawn } = await import('child_process');
+    const child = spawn(cmd, args, {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env }
+    });
+
+    if (!child.pid) {
+      throw new Error('Failed to spawn md2podcast process');
+    }
+
+    const executionId = `podcast-${Date.now()}`;
+    activeExecutions.set(executionId, {
+      pid: child.pid,
+      filename,
+      outPath,
+      logs: [],
+      status: 'running',
+      startTime: new Date()
+    });
+
+    // Record the full command string for debugging in the UI
+    try {
+      const quotedArgs = args.map(a => (String(a).includes(' ') ? `"${String(a)}"` : String(a))).join(' ');
+      const cmdLine = `${cmd} ${quotedArgs}`.trim();
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.command = cmdLine;
+        execution.logs.push({ type: 'info', message: `Command: ${cmdLine}`, timestamp: new Date() });
+      }
+    } catch (err) {
+      console.error('Error recording command for execution:', err);
+    }
+
+    child.stdout.on('data', (data) => {
+      const log = data.toString();
+      console.log(`[md2podcast stdout] ${log}`);
+      const execution = activeExecutions.get(executionId);
+      if (execution) execution.logs.push({ type: 'stdout', message: log, timestamp: new Date() });
+    });
+
+    child.stderr.on('data', (data) => {
+      const log = data.toString();
+      console.error(`[md2podcast stderr] ${log}`);
+      const execution = activeExecutions.get(executionId);
+      if (execution) execution.logs.push({ type: 'stderr', message: log, timestamp: new Date() });
+    });
+
+    child.on('exit', (code) => {
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.status = code === 0 ? 'completed' : 'failed';
+        execution.exitCode = code;
+        execution.endTime = new Date();
+      }
+      console.log(`md2podcast process exited with code ${code}`);
+    });
+
+    child.on('error', (err) => {
+      const execution = activeExecutions.get(executionId);
+      if (execution) {
+        execution.status = 'error';
+        execution.error = err.message;
+        execution.logs.push({ type: 'error', message: err.message, timestamp: new Date() });
+      }
+      console.error('md2podcast spawn error:', err);
+    });
+
+    res.json({ success: true, executionId, outFilename });
+  } catch (error) {
+    console.error('Error creating podcast:', error);
+    res.status(500).json({ error: 'Failed to create podcast', details: error.message });
+  }
+});
+
+// Download generated podcast file
+app.get('/api/reports/:filename/podcast', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const baseName = filename.replace(/\.md$/i, '');
+    const outFilename = `${baseName}.mp3`;
+    const outPath = path.join(REPORTS_DIR, outFilename);
+
+    if (!fs.existsSync(outPath)) {
+      return res.status(404).json({ error: 'Podcast file not found' });
+    }
+
+    res.download(outPath, outFilename);
+  } catch (error) {
+    console.error('Error downloading podcast:', error);
+    res.status(500).json({ error: 'Failed to download podcast', details: error.message });
   }
 });
 
@@ -308,9 +900,6 @@ app.get('/api/agents', (req, res) => {
   }
 });
 
-// Store active executions for progress tracking
-const activeExecutions = new Map();
-
 // Run agents endpoint with real-time progress
 app.post('/api/run-agents', async (req, res) => {
   try {
@@ -320,10 +909,21 @@ app.post('/api/run-agents', async (req, res) => {
       return res.status(400).json({ error: 'No agents specified' });
     }
 
+    // Feature Telemetry Tracking requires a feature (release key from config.releases)
+    if (agents.includes('feature-telemetry-tracking')) {
+      const feature = parameters?.feature?.trim?.() || parameters?.feature || '';
+      if (!feature) {
+        return res.status(400).json({
+          error: 'Feature required',
+          details: 'Please select a feature from the "Feature (release)" dropdown when running Feature Telemetry Tracking.'
+        });
+      }
+    }
+
     console.log('Received agent execution request:', { agents, dateRange, parameters });
 
-    // Build command arguments
-    const args = ['start', '--'];
+    // Build command arguments (for direct node invocation, not npm)
+    const args = [];
 
     // Add agent names
     agents.forEach(agent => args.push(agent));
@@ -355,16 +955,52 @@ app.post('/api/run-agents', async (req, res) => {
     if (parameters?.week) {
       args.push('--week', parameters.week);
     }
+    if (parameters?.insightIds) {
+      // For comma-separated values, ensure they're passed as a single argument
+      // The value may contain spaces after commas (e.g., "87660800, 87660767, 87660827")
+      // which should be preserved as a single argument
+      args.push('--insight-ids', parameters.insightIds.trim());
+      console.log('[Server] Adding insightIds parameter:', parameters.insightIds.trim());
+    }
+    if (parameters?.feature) {
+      const featureVal = typeof parameters.feature === 'string' ? parameters.feature.trim() : String(parameters.feature || '').trim();
+      if (featureVal) {
+        args.push('--feature', featureVal);
+        console.log('[Server] Adding feature parameter:', featureVal);
+      }
+    }
 
-    const commandStr = `npm ${args.join(' ')}`;
+    const commandStr = `node src/index.js ${args.join(' ')}`;
     console.log('Executing command:', commandStr);
+    console.log('[Server] Args array:', JSON.stringify(args));
 
-    // Execute the command
+    // Log active LLM backend at run time so it's always visible in the logs
+    const runBackend = llmSettings.useOllama ? 'Ollama' : llmSettings.useGemini ? 'Gemini' : 'Claude';
+    const runModel = llmSettings.useOllama ? llmSettings.ollamaModel : llmSettings.useGemini ? llmSettings.geminiModel : llmSettings.claudeModel;
+    const runIcon = llmSettings.useOllama ? '🦙' : llmSettings.useGemini ? '💎' : '🔑';
+    console.log(`${runIcon}  LLM backend for this run: ${runBackend} / ${runModel}`);
+
+    // Execute the command with LLM settings as environment variables
     const { spawn } = await import('child_process');
-    const child = spawn('npm', args, {
+    const env = {
+      ...process.env,
+      USE_OLLAMA: llmSettings.useOllama.toString(),
+      USE_GEMINI: llmSettings.useGemini.toString(),
+      OLLAMA_MODEL: llmSettings.ollamaModel,
+      OLLAMA_BASE_URL: llmSettings.ollamaBaseUrl,
+      OLLAMA_API_KEY: llmSettings.ollamaApiKey || '',
+      CLAUDE_MODEL: llmSettings.claudeModel,
+      GEMINI_MODEL: llmSettings.geminiModel,
+      // Unbuffer output to ensure real-time logs
+      PYTHONUNBUFFERED: '1',
+      NODE_NO_READLINE: '1'
+    };
+
+    // Run node directly instead of through npm to avoid buffering issues
+    const child = spawn('node', ['src/index.js', ...args], {
       cwd: path.join(__dirname, '..'),
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env
     });
 
     if (!child.pid) {
@@ -381,20 +1017,20 @@ app.post('/api/run-agents', async (req, res) => {
       startTime: new Date()
     });
 
-    // Capture stdout
+    // Capture stdout — echo to CLI and store for frontend
     child.stdout.on('data', (data) => {
       const log = data.toString();
-      console.log(log);
+      process.stdout.write(log);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stdout', message: log, timestamp: new Date() });
       }
     });
 
-    // Capture stderr
+    // Capture stderr — echo to CLI and store for frontend
     child.stderr.on('data', (data) => {
       const log = data.toString();
-      console.error(log);
+      process.stderr.write(log);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stderr', message: log, timestamp: new Date() });
@@ -454,15 +1090,79 @@ app.get('/api/execution/:executionId', (req, res) => {
   res.json(execution);
 });
 
+// Anthropic Usage & Billing (Admin API optional)
+// Balance and spending limit are only visible in Console; we can fetch period spend via Cost API when Admin key is set.
+const ANTHROPIC_ADMIN_API_KEY = process.env.ANTHROPIC_ADMIN_API_KEY || null;
+const ANTHROPIC_BILLING_URL = 'https://console.anthropic.com/settings/billing';
+
+app.get('/api/anthropic-usage', async (req, res) => {
+  try {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    const startingAt = startOfMonth.toISOString();
+    const endingAt = endOfMonth.toISOString();
+
+    let periodSpend = null;
+    let periodSpendError = null;
+
+    if (ANTHROPIC_ADMIN_API_KEY) {
+      try {
+        const url = `https://api.anthropic.com/v1/organizations/cost_report?starting_at=${encodeURIComponent(startingAt)}&ending_at=${encodeURIComponent(endingAt)}&bucket_width=1d&limit=31`;
+        const apiRes = await fetch(url, {
+          headers: {
+            'anthropic-version': '2023-06-01',
+            'x-api-key': ANTHROPIC_ADMIN_API_KEY
+          }
+        });
+        if (apiRes.ok) {
+          const data = await apiRes.json();
+          let totalCents = 0;
+          for (const bucket of data.data || []) {
+            for (const item of bucket.results || []) {
+              const amount = parseFloat(item.amount);
+              if (!Number.isNaN(amount)) totalCents += amount;
+            }
+          }
+          periodSpend = totalCents / 100; // amount is in cents
+        } else {
+          periodSpendError = apiRes.status === 401 ? 'Invalid Admin API key' : `API ${apiRes.status}`;
+        }
+      } catch (err) {
+        periodSpendError = err.message || 'Failed to fetch cost report';
+      }
+    }
+
+    res.json({
+      balance: null,
+      balanceNote: 'View in Console',
+      limit: null,
+      limitNote: 'View in Console',
+      periodSpend,
+      periodSpendError,
+      periodLabel: `${startOfMonth.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} spend`,
+      linkToBilling: ANTHROPIC_BILLING_URL,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error in anthropic-usage:', error);
+    res.status(500).json({
+      error: 'Failed to get Anthropic usage',
+      details: error.message,
+      linkToBilling: ANTHROPIC_BILLING_URL
+    });
+  }
+});
+
 // Get config.json
 app.get('/api/config', (req, res) => {
   try {
-    if (!fs.existsSync(CONFIG_PATH)) {
-      return res.status(404).json({ error: 'Config file not found' });
+    const config = loadConfig();
+    
+    if (!config) {
+      return res.status(404).json({ error: 'Config not found' });
     }
 
-    const configContent = fs.readFileSync(CONFIG_PATH, 'utf-8');
-    const config = JSON.parse(configContent);
     res.json(config);
   } catch (error) {
     console.error('Error reading config:', error);
@@ -480,8 +1180,17 @@ app.put('/api/config', (req, res) => {
       return res.status(400).json({ error: 'Invalid config format' });
     }
 
-    // Create a backup of the current config
-    const backupPath = path.join(__dirname, '..', `config.backup.${Date.now()}.json`);
+    // On Vercel, file system is read-only - config updates must be done via environment variables
+    if (process.env.VERCEL === '1') {
+      return res.status(403).json({ 
+        error: 'Config updates not supported on Vercel',
+        message: 'Please update APP_CONFIG_JSON environment variable in Vercel Dashboard and redeploy'
+      });
+    }
+
+    // Create a backup of the current config (in same directory as config.json)
+    const configDir = path.dirname(CONFIG_PATH);
+    const backupPath = path.join(configDir, `config.backup.${Date.now()}.json`);
     if (fs.existsSync(CONFIG_PATH)) {
       fs.copyFileSync(CONFIG_PATH, backupPath);
       console.log(`Config backup created at: ${backupPath}`);
@@ -498,9 +1207,72 @@ app.put('/api/config', (req, res) => {
   }
 });
 
+// Get LLM settings
+app.get('/api/settings/llm', (req, res) => {
+  try {
+    res.json(llmSettings);
+  } catch (error) {
+    console.error('Error reading LLM settings:', error);
+    res.status(500).json({ error: 'Failed to read settings', details: error.message });
+  }
+});
+
+// Update LLM settings
+app.put('/api/settings/llm', (req, res) => {
+  try {
+    const { useOllama, useGemini, ollamaModel, ollamaApiKey, claudeModel, geminiModel } = req.body;
+
+    // Validate input
+    if (useOllama !== undefined && typeof useOllama !== 'boolean') {
+      return res.status(400).json({ error: 'Invalid useOllama value' });
+    }
+    if (useGemini !== undefined && typeof useGemini !== 'boolean') {
+      return res.status(400).json({ error: 'Invalid useGemini value' });
+    }
+    // Ensure only one backend is active at a time
+    if (useOllama && useGemini) {
+      return res.status(400).json({ error: 'Cannot enable both Ollama and Gemini simultaneously' });
+    }
+
+    // Update settings
+    if (useOllama !== undefined) llmSettings.useOllama = useOllama;
+    if (useGemini !== undefined) llmSettings.useGemini = useGemini;
+    if (ollamaModel) llmSettings.ollamaModel = ollamaModel;
+    if (ollamaApiKey !== undefined) llmSettings.ollamaApiKey = ollamaApiKey;
+    if (claudeModel) llmSettings.claudeModel = claudeModel;
+    if (geminiModel) llmSettings.geminiModel = geminiModel;
+
+    const activeBackend = llmSettings.useOllama ? 'Ollama' : llmSettings.useGemini ? 'Gemini' : 'Claude';
+    const activeModel = llmSettings.useOllama ? llmSettings.ollamaModel : llmSettings.useGemini ? llmSettings.geminiModel : llmSettings.claudeModel;
+    const icon = llmSettings.useOllama ? '🦙' : llmSettings.useGemini ? '💎' : '🔑';
+    const ts = new Date().toISOString();
+    console.log('');
+    console.log('═'.repeat(60));
+    console.log(`${icon}  LLM BACKEND CHANGED  [${ts}]`);
+    console.log(`   Backend : ${activeBackend}`);
+    console.log(`   Model   : ${activeModel}`);
+    if (llmSettings.useOllama) console.log(`   URL     : ${llmSettings.ollamaBaseUrl}`);
+    if (llmSettings.useOllama && llmSettings.ollamaApiKey) console.log(`   API Key : ${llmSettings.ollamaApiKey.substring(0, 8)}...`);
+    console.log('═'.repeat(60));
+    console.log('');
+
+    res.json({ success: true, settings: llmSettings });
+  } catch (error) {
+    console.error('Error updating LLM settings:', error);
+    res.status(500).json({ error: 'Failed to update settings', details: error.message });
+  }
+});
+
 // Server-Sent Events endpoint for real-time progress
 app.get('/api/execution/:executionId/stream', (req, res) => {
   const { executionId } = req.params;
+  const { password } = req.query;
+  
+  // Check password if APP_PASSWORD is set
+  if (APP_PASSWORD && (!password || password !== APP_PASSWORD)) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid password' });
+  }
+  
   const execution = activeExecutions.get(executionId);
 
   if (!execution) {
@@ -511,40 +1283,65 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Send existing logs
+  // Send existing logs immediately
   execution.logs.forEach(log => {
-    res.write(`data: ${JSON.stringify(log)}\n\n`);
+    const logData = `data: ${JSON.stringify(log)}\n\n`;
+    res.write(logData);
   });
+  res.flush?.();
 
+  // Track if response is still open
+  let isOpen = true;
+  
   // Set up interval to check for new logs
   let lastLogIndex = execution.logs.length;
+
   const interval = setInterval(() => {
+    if (!isOpen) {
+      clearInterval(interval);
+      return;
+    }
+    
     const currentExecution = activeExecutions.get(executionId);
     if (!currentExecution) {
       clearInterval(interval);
-      res.end();
+      try { res.end(); } catch (e) {}
+      isOpen = false;
       return;
     }
 
     // Send new logs
     if (currentExecution.logs.length > lastLogIndex) {
       for (let i = lastLogIndex; i < currentExecution.logs.length; i++) {
-        res.write(`data: ${JSON.stringify(currentExecution.logs[i])}\n\n`);
+        const log = currentExecution.logs[i];
+        const logData = `data: ${JSON.stringify(log)}\n\n`;
+        res.write(logData);
       }
+      if (res.flush) res.flush();
       lastLogIndex = currentExecution.logs.length;
     }
 
-    // Send status update
+    // Send status update when complete
     if (currentExecution.status !== 'running') {
-      res.write(`data: ${JSON.stringify({ type: 'status', status: currentExecution.status, exitCode: currentExecution.exitCode })}\n\n`);
+      const statusData = `data: ${JSON.stringify({ type: 'status', status: currentExecution.status, exitCode: currentExecution.exitCode })}\n\n`;
+      res.write(statusData);
+      res.flush?.();
       clearInterval(interval);
-      res.end();
+      try { res.end(); } catch (e) {}
+      isOpen = false;
     }
-  }, 1000);
+  }, 500);
 
   // Clean up on client disconnect
   req.on('close', () => {
+    isOpen = false;
+    clearInterval(interval);
+  });
+
+  req.on('error', () => {
+    isOpen = false;
     clearInterval(interval);
   });
 });
@@ -574,7 +1371,9 @@ app.get('/api/mcp-status', async (req, res) => {
           args: serverConfig.args || []
         },
         connected: false,
+        authenticated: null,
         toolCount: 0,
+        authError: null,
         error: null
       };
 
@@ -594,9 +1393,48 @@ app.get('/api/mcp-status', async (req, res) => {
         status.toolCount = tools.length;
         status.tools = tools;
 
+        // Additional auth health check for OneNote (transport can be connected while token is invalid)
+        if (serverName.toLowerCase() === 'onenote' && tools.some(tool => tool.name === 'listNotebooks')) {
+          try {
+            await mcpClient.callTool('listNotebooks', {});
+            status.authenticated = true;
+          } catch (authError) {
+            status.authenticated = false;
+            status.authError = authError.message;
+            const authErrorLower = String(authError.message || '').toLowerCase();
+            const isAuthRequired = authErrorLower.includes('authenticationrequirederror') ||
+                                  authErrorLower.includes('authentication required') ||
+                                  authErrorLower.includes('interaction required') ||
+                                  authErrorLower.includes('consent_required') ||
+                                  authErrorLower.includes('login required') ||
+                                  authErrorLower.includes('no account') ||
+                                  authErrorLower.includes('gettoken');
+            if (isAuthRequired) {
+              status.authHint = 'OneNote authentication required. Run authenticate, complete https://microsoft.com/devicelogin, then run saveAccessToken.';
+              status.authAction = 'authenticate_then_saveAccessToken';
+            }
+          }
+        }
+
         console.log(`✓ ${serverName}: Connected (${tools.length} tools)`);
       } catch (error) {
         status.error = error.message;
+        if (serverName.toLowerCase() === 'onenote') {
+          const errorLower = String(error.message || '').toLowerCase();
+          const isAuthRequired = errorLower.includes('authenticationrequirederror') ||
+                                 errorLower.includes('authentication required') ||
+                                 errorLower.includes('interaction required') ||
+                                 errorLower.includes('consent_required') ||
+                                 errorLower.includes('login required') ||
+                                 errorLower.includes('no account') ||
+                                 errorLower.includes('gettoken');
+          if (isAuthRequired) {
+            status.authenticated = false;
+            status.authError = error.message;
+            status.authHint = 'OneNote authentication required. Run authenticate, complete https://microsoft.com/devicelogin, then run saveAccessToken.';
+            status.authAction = 'authenticate_then_saveAccessToken';
+          }
+        }
         console.log(`✗ ${serverName}: ${error.message}`);
       }
 
@@ -608,11 +1446,13 @@ app.get('/api/mcp-status', async (req, res) => {
 
     const connectedCount = serverStatuses.filter(s => s.connected).length;
     const totalCount = serverStatuses.length;
+    const unauthenticatedCount = serverStatuses.filter(s => s.authenticated === false).length;
 
     res.json({
       totalServers: totalCount,
       connectedServers: connectedCount,
       failedServers: totalCount - connectedCount,
+      unauthenticatedServers: unauthenticatedCount,
       servers: serverStatuses,
       timestamp: new Date().toISOString()
     });
@@ -621,6 +1461,104 @@ app.get('/api/mcp-status', async (req, res) => {
     console.error('Error checking MCP status:', error);
     res.status(500).json({
       error: 'Failed to check MCP status',
+      details: error.message
+    });
+  }
+});
+
+// Refresh MCP connections
+app.post('/api/mcp-refresh', async (req, res) => {
+  try {
+    // Import MCPClientManager
+    const { MCPClientManager } = await import('../src/mcp-client.js');
+
+    // Create a temporary MCP client instance
+    const mcpClient = new MCPClientManager();
+
+    console.log('Refreshing MCP connections...');
+
+    // Close existing connections
+    await mcpClient.close().catch(() => {}); // Ignore errors if not initialized
+
+    // Reinitialize connections
+    await mcpClient.initialize();
+
+    // Get connection summary
+    const tools = mcpClient.getAvailableTools();
+    const connectedCount = mcpClient.clients.size;
+
+    // Clean up
+    await mcpClient.close();
+
+    res.json({
+      success: true,
+      message: 'MCP connections refreshed successfully',
+      connectedServers: connectedCount,
+      availableTools: tools.length,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error refreshing MCP connections:', error);
+    res.status(500).json({
+      error: 'Failed to refresh MCP connections',
+      details: error.message
+    });
+  }
+});
+
+// Clear Slack MCP cache
+app.post('/api/mcp-clear-cache', async (req, res) => {
+  try {
+    const os = await import('os');
+    const cacheDir = path.join(os.default.homedir(), 'Library/Caches/slack-mcp-server');
+    const channelCacheFile = path.join(cacheDir, 'channels_cache_v2.json');
+    const usersCacheFile = path.join(cacheDir, 'users_cache.json');
+
+    const clearedFiles = [];
+    const errors = [];
+
+    // Try to delete channel cache
+    if (fs.existsSync(channelCacheFile)) {
+      try {
+        fs.unlinkSync(channelCacheFile);
+        clearedFiles.push('channels_cache_v2.json');
+      } catch (error) {
+        errors.push(`Failed to delete channel cache: ${error.message}`);
+      }
+    }
+
+    // Try to delete users cache
+    if (fs.existsSync(usersCacheFile)) {
+      try {
+        fs.unlinkSync(usersCacheFile);
+        clearedFiles.push('users_cache.json');
+      } catch (error) {
+        errors.push(`Failed to delete users cache: ${error.message}`);
+      }
+    }
+
+    if (clearedFiles.length > 0) {
+      res.json({
+        success: true,
+        message: `Cleared ${clearedFiles.length} cache file(s)`,
+        clearedFiles,
+        errors: errors.length > 0 ? errors : undefined,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.json({
+        success: true,
+        message: 'No cache files found to clear',
+        clearedFiles: [],
+        timestamp: new Date().toISOString()
+      });
+    }
+
+  } catch (error) {
+    console.error('Error clearing Slack cache:', error);
+    res.status(500).json({
+      error: 'Failed to clear Slack cache',
       details: error.message
     });
   }
@@ -635,8 +1573,21 @@ app.get('/*.md', (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://0.0.0.0:${PORT}`);
-  console.log(`Access from network at http://10.88.111.20:${PORT}`);
-});
+// Export app for Vercel serverless function use
+export default app;
+
+// Only start server if running directly (not as serverless function)
+// Check if this module is being executed directly vs imported
+const isVercel = process.env.VERCEL === '1';
+const isMainModule = process.argv[1] && 
+                     (import.meta.url === `file://${process.argv[1]}` || 
+                      process.argv[1].endsWith('server.js') ||
+                      import.meta.url.endsWith('server.js'));
+
+if (!isVercel && isMainModule) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Access from network at http://10.88.111.48:${PORT}`);
+  });
+}
 

@@ -5,26 +5,32 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 
 function AgentRunner({ password, onClose }) {
   const [agents, setAgents] = useState([
-    { name: 'prep-for-week', displayName: 'Prep for the Week', description: 'Prepare for upcoming week with todos, calendar, and 1-1 notes', lastRun: null },
-    { name: 'weekly-recap', displayName: 'Weekly Recap', description: 'Weekly team catch-up and recap', lastRun: null },
-    { name: 'business-health', displayName: 'Business Health', description: 'Officevibe business and product health', requiresParam: 'manualSourcesFolder', lastRun: null },
-    { name: 'product-engineering', displayName: 'Product Engineering', description: 'Product development and engineering updates', lastRun: null },
-    { name: 'telemetry-deepdive', displayName: 'Telemetry Deep Dive', description: 'Deep dive into telemetry data', requiresParam: 'folder', lastRun: null },
-    { name: 'team-pulse', displayName: 'Team Pulse', description: 'Team engagement and pulse survey analysis', lastRun: null },
-    { name: 'pingboard-migration', displayName: 'Pingboard Migration', description: 'Pingboard migration status', lastRun: null },
-    { name: 'jira-tracker', displayName: 'Jira Tracker', description: 'Track Jira issues and progress', lastRun: null },
-    { name: 'okr-progress', displayName: 'OKR Progress', description: 'OKR updates and progress tracking', lastRun: null },
-    { name: 'productivity-weekly-tracker', displayName: 'Productivity Tracker', description: 'Weekly productivity tracking', lastRun: null },
-    { name: 'quarterly-review', displayName: 'Quarterly Review', description: 'Quarterly review of product releases and OKR updates', lastRun: null },
-    { name: 'quarterly-performance-review', displayName: 'Quarterly Performance Review', description: 'Quarterly performance review for Director of Product', lastRun: null },
-    { name: 'performance-review-q3', displayName: 'Q3 Performance Review (WL)', description: 'Generate Q3 performance review using Workleap questionnaire format', requiresParam: 'email', lastRun: null },
-    { name: 'thoughtleadership-updates', displayName: 'Thought Leadership', description: 'Product thought leadership and new topics', lastRun: null },
-    { name: 'officevibe-strategy-roadmap', displayName: 'Officevibe Strategy Roadmap', description: 'Strategy roadmap for Officevibe', lastRun: null },
-    { name: 'slack-user-analysis', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', lastRun: null },
-    { name: '1-1', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', lastRun: null },
-    { name: 'weekly-executive-summary', displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
-    { name: 'good-vibes-recognition', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null }
-     
+    { name: 'prep-for-week', category: 'Prep', displayName: 'Prep for the Week', description: 'Prepare for upcoming week with todos, calendar, and 1-1 notes', lastRun: null },
+    { name: 'daily-brief', category: 'Prep', displayName: 'Daily Brief', description: 'Super concise daily brief with top 2 items from news, Slack, and Jira from yesterday', lastRun: null },
+    { name: 'onenote-todos', category: 'Prep', displayName: 'OneNote Todos', description: 'Extract and display all open todos from current week\'s OneNote', lastRun: null },
+    { name: 'weekly-recap', category: 'Prep', displayName: 'Weekly Recap', description: 'Weekly team catch-up and recap', lastRun: null },
+    { name: 'business-health', category: 'Business', displayName: 'Business Health', description: 'Business and product health', requiresParam: 'manualSourcesFolder', lastRun: null },
+    { name: 'business-pulse', category: 'Business', displayName: 'Business Pulse Brief', description: 'Business pulse brief', lastRun: null },
+    { name: 'product-engineering', category: 'Productivity', displayName: 'Product Engineering', description: 'Product development and engineering updates', lastRun: null },
+    { name: 'telemetry-deepdive', category: 'Telemetry', displayName: 'Telemetry Deep Dive', description: 'Deep dive into telemetry data', requiresParam: 'folder', lastRun: null },
+    { name: 'mixpanel-query', category: 'Telemetry',  displayName: 'Mixpanel Query', description: 'Query Mixpanel analytics for retention, usage, and feature metrics', lastRun: null },
+    { name: 'feature-telemetry-tracking', category: 'Telemetry', displayName: 'Feature Telemetry Tracking', description: 'Analyze one feature\'s Mixpanel telemetry vs overall MAU and adoption', requiresParam: 'feature', lastRun: null },
+    { name: 'team-pulse', category: 'Team', displayName: 'Team Pulse', description: 'Team engagement and pulse survey analysis', lastRun: null },
+    { name: 'jira-tracker', category: 'Productivity', displayName: 'Jira Tracker', description: 'Track Jira issues and progress', lastRun: null },
+    { name: 'okr-progress', category: 'Productivity', displayName: 'OKR Progress', description: 'OKR updates and progress tracking', lastRun: null },
+    { name: 'productivity-weekly-tracker', category: 'Productivity', displayName: 'Productivity Tracker', description: 'Weekly productivity tracking', lastRun: null },
+    { name: 'quarterly-review', category: 'Business', displayName: 'Quarterly Review', description: 'Quarterly review of product releases and OKR updates', lastRun: null },
+    { name: 'quarterly-performance-review', category: 'Team', displayName: 'Quarterly Performance Review', description: 'Quarterly performance review for Director of Product', lastRun: null },
+    { name: 'performance-review-q3', category: 'Team', displayName: 'Q3 Performance Review (WL)', description: 'Generate Q3 performance review using Workleap questionnaire format', requiresParam: 'email', lastRun: null },
+    { name: 'thoughtleadership-updates', category: 'Prep', displayName: 'Thought Leadership', description: 'Product thought leadership and new topics', lastRun: null },
+    { name: 'strategy-roadmap', category: 'Business', displayName: 'Strategy Roadmap', description: 'Strategy roadmap', lastRun: null },
+    { name: 'slack-user-analysis', category: 'Team', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', paramType: 'slackUserTeam', lastRun: null },
+    { name: '1-1', category: 'Team', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', paramType: 'oneOnOne', lastRun: null },
+    { name: 'epp', category: 'Team', displayName: 'Employee Personality Profile', description: 'Generate personality profile using Myers-Briggs and Insights frameworks', requiresParam: 'email', lastRun: null },
+    { name: 'weekly-executive-summary', category: 'Prep',  displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
+    { name: 'good-vibes-recognition', category: 'Team', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null },
+    { name: 'icp-inspector', category: 'Business', displayName: 'ICP Inspector', description: 'Cross-check CRM companies (20–250 seats) with Gong calls and VoC; split by closed won/lost', lastRun: null },
+    
   ])
 
   const [selectedAgents, setSelectedAgents] = useState([])
@@ -37,8 +43,12 @@ function AgentRunner({ password, onClose }) {
     manualSourcesFolder: '',
     folder: '',
     email: '',
-    week: ''
+    week: '',
+    feature: ''
   })
+  const [releases, setReleases] = useState({}) // config.releases for feature dropdown
+  const [teamMembers, setTeamMembers] = useState([]) // team members for slack user analysis
+  const [oneOnOnes, setOneOnOnes] = useState([]) // 1-1s for 1-1 prep
   const [isRunning, setIsRunning] = useState(false)
   const [executionStatus, setExecutionStatus] = useState(null)
   const [executionLogs, setExecutionLogs] = useState([])
@@ -52,6 +62,24 @@ function AgentRunner({ password, onClose }) {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [executionLogs])
+
+  // Fetch config data (releases, team members, 1-1s)
+  useEffect(() => {
+    const fetchConfigData = async () => {
+      try {
+        const headers = password ? { 'x-app-password': password } : {}
+        const response = await fetch(`${API_URL}/api/config`, { headers })
+        if (!response.ok) return
+        const config = await response.json()
+        setReleases(config.releases || {})
+        setTeamMembers(config.team?.ovTeamMembers || [])
+        setOneOnOnes(config.team?.['1-1s'] || [])
+      } catch (err) {
+        console.error('Error fetching config:', err)
+      }
+    }
+    fetchConfigData()
+  }, [password])
 
   // Fetch last run timestamps for each agent
   useEffect(() => {
@@ -183,47 +211,123 @@ function AgentRunner({ password, onClose }) {
       setExecutionLogs(prev => [...prev, `Process started with PID: ${result.pid}`])
 
       // Connect to Server-Sent Events stream for real-time logs
-      const eventSource = new EventSource(`${API_URL}/api/execution/${result.executionId}/stream`)
+      const streamUrl = password 
+        ? `${API_URL}/api/execution/${result.executionId}/stream?password=${encodeURIComponent(password)}`
+        : `${API_URL}/api/execution/${result.executionId}/stream`
+      console.log(`Connecting to SSE stream: ${streamUrl}`)
+      let eventSource = null
+      let sseConnected = false
+      let fallbackPollInterval = null
 
-      eventSource.onmessage = (event) => {
+      const connectSSE = () => {
         try {
-          const data = JSON.parse(event.data)
+          eventSource = new EventSource(streamUrl)
+          sseConnected = false
 
-          if (data.type === 'status') {
-            setExecutionStatus(data.status)
-            if (data.status === 'completed') {
-              setExecutionLogs(prev => [...prev, '✓ Execution completed successfully!'])
-              setIsRunning(false)
-              eventSource.close()
-              // Reload reports after completion
-              setTimeout(() => {
-                window.location.reload()
-              }, 2000)
-            } else if (data.status === 'failed') {
-              setExecutionLogs(prev => [...prev, `✗ Execution failed with exit code ${data.exitCode}`])
-              setIsRunning(false)
-              eventSource.close()
+          eventSource.onopen = () => {
+            console.log('SSE connection opened')
+            sseConnected = true
+            setExecutionLogs(prev => [...prev, '[Connected to real-time log stream]'])
+          }
+
+          eventSource.onmessage = (event) => {
+            try {
+              console.log('Received SSE message data length:', event.data?.length)
+              const data = JSON.parse(event.data)
+
+              if (data.type === 'status') {
+                console.log('Status update:', data.status)
+                setExecutionStatus(data.status)
+                if (data.status === 'completed') {
+                  setExecutionLogs(prev => [...prev, '✓ Execution completed successfully!'])
+                  setIsRunning(false)
+                  eventSource.close()
+                  clearInterval(fallbackPollInterval)
+                  // Reload reports after completion
+                  setTimeout(() => {
+                    window.location.reload()
+                  }, 2000)
+                } else if (data.status === 'failed') {
+                  setExecutionLogs(prev => [...prev, `✗ Execution failed with exit code ${data.exitCode}`])
+                  setIsRunning(false)
+                  eventSource.close()
+                  clearInterval(fallbackPollInterval)
+                }
+              } else if (data.type === 'stdout' || data.type === 'stderr') {
+                // Split multi-line messages into individual log entries
+                const message = data.message?.trim() || ''
+                if (message) {
+                  const lines = message.split('\n')
+                  setExecutionLogs(prev => [...prev, ...lines.filter(line => line.trim())])
+                }
+              } else if (data.type === 'error') {
+                const errorLines = data.message?.split('\n').filter(line => line.trim()) || []
+                setExecutionLogs(prev => [...prev, ...errorLines.map(line => `ERROR: ${line}`)])
+                setDetailedError(data.message)
+              }
+            } catch (err) {
+              console.error('Error parsing SSE data:', err, 'Raw data:', event.data?.substring(0, 200))
             }
-          } else if (data.type === 'stdout' || data.type === 'stderr') {
-            // Filter out empty lines and add log
-            const message = data.message.trim()
-            if (message) {
-              setExecutionLogs(prev => [...prev, message])
+          }
+
+          eventSource.onerror = (error) => {
+            console.error('SSE Error:', error)
+            console.log('EventSource readyState:', eventSource.readyState)
+            if (eventSource.readyState === EventSource.CLOSED) {
+              console.log('SSE connection closed, falling back to polling')
+              sseConnected = false
+              eventSource.close()
+              // Start fallback polling
+              startFallbackPolling()
             }
-          } else if (data.type === 'error') {
-            setExecutionLogs(prev => [...prev, `ERROR: ${data.message}`])
-            setDetailedError(data.message)
           }
         } catch (err) {
-          console.error('Error parsing SSE data:', err)
+          console.error('Error creating EventSource:', err)
+          startFallbackPolling()
         }
       }
 
-      eventSource.onerror = (error) => {
-        console.error('SSE Error:', error)
-        eventSource.close()
-        // Don't set error status here - the stream might just be ending normally
+      const startFallbackPolling = () => {
+        console.log('Starting fallback polling mechanism')
+        setExecutionLogs(prev => [...prev, '[Using polling fallback for logs]'])
+        let lastFetchTime = Date.now()
+        
+        fallbackPollInterval = setInterval(async () => {
+          try {
+            const headers = password ? { 'x-app-password': password } : {}
+            const response = await fetch(`${API_URL}/api/execution/${result.executionId}`, { headers })
+            if (response.ok) {
+              const execution = await response.json()
+              if (execution.logs && execution.logs.length > (executionLogs.length - 1)) {
+                const newLogs = execution.logs.slice(executionLogs.length - 1)
+                newLogs.forEach(log => {
+                  if (log.type === 'stdout' || log.type === 'stderr') {
+                    const message = log.message?.trim() || ''
+                    if (message) {
+                      const lines = message.split('\n')
+                      setExecutionLogs(prev => [...prev, ...lines.filter(line => line.trim())])
+                    }
+                  }
+                })
+              }
+              if (execution.status !== 'running') {
+                clearInterval(fallbackPollInterval)
+                setExecutionStatus(execution.status)
+                if (execution.status === 'completed') {
+                  setExecutionLogs(prev => [...prev, '✓ Execution completed!'])
+                  setIsRunning(false)
+                  setTimeout(() => window.location.reload(), 2000)
+                }
+              }
+            }
+          } catch (err) {
+            console.error('Fallback poll error:', err)
+          }
+        }, 2000)
       }
+
+      // Try SSE first
+      connectSSE()
 
     } catch (error) {
       console.error('Error running agents:', error)
@@ -238,6 +342,29 @@ function AgentRunner({ password, onClose }) {
   const selectedAgentsRequiringParams = agents.filter(
     a => selectedAgents.includes(a.name) && a.requiresParam
   )
+
+  const agentsByCategory = agents.reduce((groupedAgents, agent) => {
+    const category = agent.category || 'Other'
+    if (!groupedAgents[category]) {
+      groupedAgents[category] = []
+    }
+    groupedAgents[category].push(agent)
+    return groupedAgents
+  }, {})
+
+  const categoryOrder = ['Prep', 'Business', 'Productivity', 'Telemetry', 'Team', 'Other']
+  const sortedCategories = Object.keys(agentsByCategory).sort((a, b) => {
+    const indexA = categoryOrder.indexOf(a)
+    const indexB = categoryOrder.indexOf(b)
+    const normalizedA = indexA === -1 ? Number.MAX_SAFE_INTEGER : indexA
+    const normalizedB = indexB === -1 ? Number.MAX_SAFE_INTEGER : indexB
+
+    if (normalizedA !== normalizedB) {
+      return normalizedA - normalizedB
+    }
+
+    return a.localeCompare(b)
+  })
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -269,40 +396,55 @@ function AgentRunner({ password, onClose }) {
                 {selectedAgents.length === agents.length ? 'Deselect All' : 'Select All'}
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-3">
-              {agents.map(agent => (
-                <label
-                  key={agent.name}
-                  className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                    selectedAgents.includes(agent.name)
-                      ? 'border-teal-500 bg-teal-50'
-                      : 'border-gray-200 hover:border-teal-300 bg-white'
-                  } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedAgents.includes(agent.name)}
-                    onChange={() => handleAgentToggle(agent.name)}
-                    disabled={isRunning}
-                    className="mt-1 w-4 h-4 text-[#00203F] rounded focus:ring-teal-500"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-medium text-gray-900 text-sm">
-                        {agent.displayName}
-                        {agent.requiresParam && (
-                          <span className="ml-2 text-xs text-orange-600 font-normal">*</span>
-                        )}
-                      </div>
-                      <div className={`text-xs font-medium ${
-                        agent.lastRun ? 'text-gray-500' : 'text-gray-400 italic'
-                      }`}>
-                        {formatRelativeTime(agent.lastRun)}
-                      </div>
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">{agent.description}</div>
+            <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-3 space-y-4">
+              {sortedCategories.map(category => (
+                <div key={category}>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-2">{category}</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {agentsByCategory[category].map(agent => (
+                      <label
+                        key={agent.name}
+                        className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                          selectedAgents.includes(agent.name)
+                            ? 'border-teal-500 bg-teal-50'
+                            : 'border-gray-200 hover:border-teal-300 bg-white'
+                        } ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedAgents.includes(agent.name)}
+                          onChange={() => handleAgentToggle(agent.name)}
+                          disabled={isRunning}
+                          className="mt-1 w-4 h-4 text-[#00203F] rounded focus:ring-teal-500"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium text-gray-900 text-sm flex items-center gap-1.5">
+                              {agent.displayName}
+                              {agent.requiresParam && (
+                                <span className="text-xs text-orange-600 font-normal">*</span>
+                              )}
+                              {agent.isPrivate && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 border border-purple-300" title="Private - This agent only accesses health data and is kept confidential">
+                                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                                  </svg>
+                                  Private
+                                </span>
+                              )}
+                            </div>
+                            <div className={`text-xs font-medium ${
+                              agent.lastRun ? 'text-gray-500' : 'text-gray-400 italic'
+                            }`}>
+                              {formatRelativeTime(agent.lastRun)}
+                            </div>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-0.5">{agent.description}</div>
+                        </div>
+                      </label>
+                    ))}
                   </div>
-                </label>
+                </div>
               ))}
             </div>
           </div>
@@ -351,31 +493,78 @@ function AgentRunner({ password, onClose }) {
                 {selectedAgentsRequiringParams.map(agent => (
                   <div key={agent.requiresParam} className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                     <label className="block text-sm font-medium text-gray-900 mb-1">
-                      {agent.requiresParam === 'slackUserId' && 'Slack User ID'}
+                      {agent.paramType === 'slackUserTeam' && 'Select Team Member'}
+                      {agent.paramType === 'oneOnOne' && 'Select Person for 1-1'}
+                      {agent.requiresParam === 'slackUserId' && !agent.paramType && 'Slack User ID'}
                       {agent.requiresParam === 'manualSourcesFolder' && 'Manual Sources Folder'}
                       {agent.requiresParam === 'folder' && 'Folder'}
-                      {agent.requiresParam === 'email' && 'Email'}
+                      {agent.requiresParam === 'email' && !agent.paramType && 'Email'}
                       {agent.requiresParam === 'week' && 'Week'}
+                      {agent.requiresParam === 'feature' && 'Feature (release)'}
                       <span className="text-orange-600 ml-1">*</span>
                     </label>
                     <div className="text-xs text-gray-600 mb-2">
                       Required for: {agent.displayName}
                     </div>
-                    <input
-                      type="text"
-                      value={parameters[agent.requiresParam]}
-                      onChange={(e) => handleParameterChange(agent.requiresParam, e.target.value)}
-                      disabled={isRunning}
-                      placeholder={
-                        agent.requiresParam === 'slackUserId' ? 'e.g., U01234567AB' :
-                        agent.requiresParam === 'manualSourcesFolder' ? 'e.g., Week 1' :
-                        agent.requiresParam === 'folder' ? 'e.g., week1' :
-                        agent.requiresParam === 'email' ? 'e.g., user@example.com' :
-                        agent.requiresParam === 'week' ? 'e.g., week 1 or week 1 2025' :
-                        ''
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
-                    />
+                    {agent.requiresParam === 'feature' ? (
+                      <select
+                        value={parameters.feature}
+                        onChange={(e) => handleParameterChange('feature', e.target.value)}
+                        disabled={isRunning}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white"
+                      >
+                        <option value="">Select a feature (release)...</option>
+                        {Object.entries(releases).map(([key, r]) => (
+                          <option key={key} value={key}>
+                            {r.name || key} {r.telemetry ? '' : '(no telemetry)'}
+                          </option>
+                        ))}
+                      </select>
+                    ) : agent.paramType === 'slackUserTeam' ? (
+                      <select
+                        value={parameters.slackUserId}
+                        onChange={(e) => handleParameterChange('slackUserId', e.target.value)}
+                        disabled={isRunning}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white"
+                      >
+                        <option value="">Select a team member...</option>
+                        {teamMembers.map(member => (
+                          <option key={member.slackId} value={member.slackId}>
+                            {member.name} ({member.role})
+                          </option>
+                        ))}
+                      </select>
+                    ) : agent.paramType === 'oneOnOne' ? (
+                      <select
+                        value={parameters.email}
+                        onChange={(e) => handleParameterChange('email', e.target.value)}
+                        disabled={isRunning}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white"
+                      >
+                        <option value="">Select a person for 1-1...</option>
+                        {oneOnOnes.map(person => (
+                          <option key={person.email} value={person.email}>
+                            {person.name} ({person.role})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={parameters[agent.requiresParam]}
+                        onChange={(e) => handleParameterChange(agent.requiresParam, e.target.value)}
+                        disabled={isRunning}
+                        placeholder={
+                          agent.requiresParam === 'slackUserId' ? 'e.g., U01234567AB' :
+                          agent.requiresParam === 'manualSourcesFolder' ? 'e.g., Week 1' :
+                          agent.requiresParam === 'folder' ? 'e.g., week1' :
+                          agent.requiresParam === 'email' ? 'e.g., user@example.com' :
+                          agent.requiresParam === 'week' ? 'e.g., week 1 or week 1 2025' :
+                          ''
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                      />
+                    )}
                   </div>
                 ))}
               </div>

@@ -55,6 +55,10 @@ function ReportList({ reports, onReportSelect }) {
       'business-health': 'from-teal-500 to-teal-500',
       'product-engineering': 'from-teal-500 to-teal-500',
       'okr-progress': 'from-orange-500 to-teal-500',
+      'release-tracker': 'from-indigo-500 to-purple-500',
+      'telemetry-deepdive': 'from-purple-500 to-teal-500',
+      'mixpanel-query': 'from-purple-500 to-teal-500',
+      'feature-telemetry-tracking': 'from-purple-500 to-teal-500',
     }
     return colors[agentName] || 'from-teal-500 to-teal-500'
   }
@@ -128,6 +132,21 @@ function ReportList({ reports, onReportSelect }) {
                     ${report.cost.toFixed(4)}
                   </span>
                 )}
+                {report.llm && (
+                  <span
+                    className={`text-xs font-semibold px-2 py-0.5 rounded-md border ${
+                      report.llm.startsWith('Gemini')
+                        ? 'text-purple-700 bg-purple-50 border-purple-200'
+                        : report.llm.startsWith('Ollama')
+                        ? 'text-amber-700 bg-amber-50 border-amber-200'
+                        : 'text-blue-700 bg-blue-50 border-blue-200'
+                    }`}
+                    title={report.llm}
+                  >
+                    {report.llm.startsWith('Gemini') ? '💎' : report.llm.startsWith('Ollama') ? '🦙' : '🔑'}{' '}
+                    {report.llm.split(' (')[0]}
+                  </span>
+                )}
                 {hasNotes(report.filename) && (
                   <span className="inline-flex items-center text-xs text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200" title="Has evaluation notes">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -142,7 +161,7 @@ function ReportList({ reports, onReportSelect }) {
                 </p>
               )}
             </div>
-              <div className="ml-4 flex items-center">
+            <div className="ml-4 flex items-center">
               <div className="bg-teal-100 group-hover:bg-teal-200 rounded-full p-1.5 transition-colors">
                 <svg
                   className="w-5 h-5 text-[#00203F] group-hover:text-teal-700 group-hover:translate-x-1 transition-all"
