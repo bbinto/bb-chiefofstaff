@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { MCP_DEFAULTS, MIXPANEL_RATE_LIMITS } from './utils/constants.js';
 import { MixpanelRateLimiter } from './agent/mixpanel-rate-limiter.js';
+import { sleep } from './utils/helpers.js';
 
 /**
  * MCP Client Manager
@@ -137,13 +138,6 @@ export class MCPClientManager {
   }
 
   /**
-   * Sleep utility for retry delays
-   */
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
    * Wrapper to add timeout to a promise
    */
   async withTimeout(promise, timeoutMs, operationName) {
@@ -205,7 +199,7 @@ export class MCPClientManager {
         if (attempt > 1) {
           const delay = this.retryDelay * Math.pow(2, attempt - 2); // Exponential backoff
           console.log(`  Retrying ${serverName} (attempt ${attempt}/${this.maxRetries}) after ${delay}ms...`);
-          await this.sleep(delay);
+          await sleep(delay);
         }
         
         await this.connectToServer(serverName, serverConfig);

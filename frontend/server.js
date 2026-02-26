@@ -870,6 +870,80 @@ app.get('/api/reports/:filename/podcast', (req, res) => {
   }
 });
 
+// Compare two reports using the current LLM
+app.post('/api/reports/compare', async (req, res) => {
+  const { report1, report2 } = req.body;
+  if (!report1 || !report2) {
+    return res.status(400).json({ error: 'report1 and report2 filenames are required' });
+  }
+
+  const path1 = path.join(REPORTS_DIR, path.basename(report1));
+  const path2 = path.join(REPORTS_DIR, path.basename(report2));
+
+  if (!fs.existsSync(path1)) return res.status(404).json({ error: `Report not found: ${report1}` });
+  if (!fs.existsSync(path2)) return res.status(404).json({ error: `Report not found: ${report2}` });
+
+  const content1 = fs.readFileSync(path1, 'utf8');
+  const content2 = fs.readFileSync(path2, 'utf8');
+
+  const prompt = [
+    'You are an expert analyst comparing two AI-generated reports to evaluate LLM output quality differences.',
+    'Compare the two reports below and return a JSON object with exactly this structure:',
+    '{',
+    '  "summary": "2-3 sentence overall comparison",',
+    '  "contentDifferences": [',
+    '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
+    '  ],',
+    '  "formattingDifferences": [',
+    '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
+    '  ],',
+    '  "overallVerdict": "report1_better | report2_better | comparable",',
+    '  "overallReason": "string"',
+    '}',
+    '',
+    'For contentDifferences, evaluate aspects like: accuracy, completeness, depth of analysis, actionability, key insights quality.',
+    'For formattingDifferences, evaluate aspects like: structure, use of headings, use of lists/tables, readability, length appropriateness.',
+    'Return ONLY the JSON object, no markdown code fences, no extra text.',
+    '',
+    `=== REPORT 1: ${report1} ===`,
+    content1,
+    '',
+    `=== REPORT 2: ${report2} ===`,
+    content2
+  ].join('\n');
+
+  try {
+    let text;
+    if (llmSettings.useOllama) {
+      text = await generateLightReportWithOllama(prompt);
+    } else if (llmSettings.useGemini) {
+      text = await generateLightReportWithGemini(prompt);
+    } else {
+      text = await generateLightReportWithClaude(prompt);
+    }
+
+    // Strip markdown fences if the LLM wrapped the JSON anyway
+    const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    let comparison;
+    try {
+      comparison = JSON.parse(cleaned);
+    } catch {
+      return res.status(500).json({ error: 'LLM returned invalid JSON', raw: text });
+    }
+
+    const activeModel = llmSettings.useOllama
+      ? `Local Ollama (${llmSettings.ollamaModel})`
+      : llmSettings.useGemini
+        ? `Gemini (${llmSettings.geminiModel})`
+        : `Claude (${llmSettings.claudeModel})`;
+
+    res.json({ comparison, model: activeModel });
+  } catch (err) {
+    console.error('[compare] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get unique agent names
 app.get('/api/agents', (req, res) => {
   try {

@@ -16,6 +16,7 @@ import {
   HTTP_STATUS,
   ERROR_TYPES
 } from './utils/constants.js';
+import { sleep } from './utils/helpers.js';
 
 /**
  * Agent Runner
@@ -43,11 +44,8 @@ export class AgentRunner {
       console.log(`  Model: ${this.model}`);
       console.log(`  Base URL: http://localhost:11434/v1`);
     } else if (this.useGemini) {
-      console.log('💎 Using Google Gemini API');
-      this.geminiClient = new OpenAI({
-        apiKey: process.env.GOOGLE_GEMINI_API_KEY,
-        baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/'
-      });
+      console.log('💎 Using Google Gemini API (direct fetch)');
+      this.geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY;
       this.model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite';
       console.log(`  Model: ${this.model}`);
     } else {
@@ -76,13 +74,6 @@ export class AgentRunner {
     return fs.readFileSync(agentPath, 'utf8');
   }
 
-
-  /**
-   * Sleep utility
-   */
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
 
   /**
    * Convert Anthropic format to OpenAI format for Ollama.
@@ -177,18 +168,41 @@ export class AgentRunner {
     };
 
     // 3. Convert Anthropic tool schemas → OpenAI function schemas
+    // Strip fields Gemini doesn't support (additionalProperties, $schema, etc.)
     if (params.tools && params.tools.length > 0) {
       converted.tools = params.tools.map(tool => ({
         type: 'function',
         function: {
           name: tool.name,
           description: tool.description || '',
-          parameters: tool.input_schema || { type: 'object', properties: {}, required: [] }
+          parameters: this.stripGeminiUnsupportedSchemaFields(
+            tool.input_schema || { type: 'object', properties: {}, required: [] }
+          )
         }
       }));
     }
 
     return converted;
+  }
+
+  /**
+   * Recursively strip JSON Schema fields that the Gemini API doesn't support.
+   * Gemini rejects: additionalProperties, $schema, exclusiveMinimum/Maximum (as booleans), examples.
+   */
+  stripGeminiUnsupportedSchemaFields(schema) {
+    if (!schema || typeof schema !== 'object') return schema;
+    if (Array.isArray(schema)) return schema.map(s => this.stripGeminiUnsupportedSchemaFields(s));
+    const unsupported = ['additionalProperties', '$schema', 'examples', 'default'];
+    const result = {};
+    for (const [key, value] of Object.entries(schema)) {
+      if (unsupported.includes(key)) continue;
+      if (typeof value === 'object' && value !== null) {
+        result[key] = this.stripGeminiUnsupportedSchemaFields(value);
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
   }
 
   /**
@@ -237,6 +251,37 @@ export class AgentRunner {
   }
 
   /**
+   * Call the Gemini OpenAI-compatible endpoint directly via fetch.
+   * Avoids OpenAI SDK overhead/headers that can cause 404s on the Gemini API.
+   */
+  async callGeminiDirect(geminiParams) {
+    const url = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.geminiApiKey}`
+      },
+      body: JSON.stringify(geminiParams)
+    });
+
+    const responseText = await response.text();
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      throw new Error(`Gemini API returned non-JSON response (status ${response.status}): ${responseText.slice(0, 200)}`);
+    }
+
+    if (!response.ok) {
+      const errMsg = data?.error?.message || data?.error || responseText.slice(0, 300);
+      throw new Error(`Gemini API error (${response.status}): ${errMsg}`);
+    }
+
+    return data;
+  }
+
+  /**
    * Make API call with rate limiting and retry logic
    */
   async makeApiCall(params, retries = RETRY_CONFIG.MAX_RETRIES) {
@@ -259,7 +304,7 @@ export class AgentRunner {
           response = this.convertResponseFromOllama(ollamaResponse);
         } else if (this.useGemini) {
           const geminiParams = this.convertParamsForGemini(params);
-          const geminiResponse = await this.geminiClient.chat.completions.create(geminiParams);
+          const geminiResponse = await this.callGeminiDirect(geminiParams);
           response = this.convertResponseFromGemini(geminiResponse);
         } else {
           response = await this.anthropic.messages.create(params);
@@ -343,6 +388,140 @@ export class AgentRunner {
   }
 
   /**
+   * Build the parameter injection message for a given agent.
+   * Returns an empty string if the agent needs no parameters.
+   */
+  buildParameterMessage(agentName) {
+    const p = this.agentParams;
+
+    const builders = {
+      'slack-user-analysis': () => p.slackUserId
+        ? `\n\n**IMPORTANT: Slack User ID Parameter**\nThe Slack user ID to analyze is: ${p.slackUserId}\nPlease use this user ID to search for their messages and analyze their contributions.`
+        : `\n\n**IMPORTANT: Slack User ID Parameter Required**\nNo Slack user ID was provided. Please ask the user for the Slack user ID before proceeding with the analysis. The Slack user ID format is typically "U" followed by alphanumeric characters (e.g., "U01234567AB").`,
+
+      'business-health': () => p.manualSourcesFolder
+        ? `\n\n**IMPORTANT: Manual Sources Folder Parameter**\nThe folder to use for manual sources is: "${p.manualSourcesFolder}"\nPlease use files from the "${p.manualSourcesFolder}" subfolder within manual_sources. When using the read_file_from_manual_sources tool, specify filenames relative to this folder (e.g., if folder is "Week 1" and file is "ARR OV.xlsx", use filename "ARR OV.xlsx" or "Week 1/ARR OV.xlsx").`
+        : '',
+
+      'telemetry-deepdive': () => {
+        console.log('[AgentRunner] Processing telemetry-deepdive agent. this.agentParams:', p);
+        console.log('[AgentRunner] this.agentParams.folder value:', p.folder);
+        if (p.folder) {
+          console.log('[AgentRunner] ✅ Folder parameter found! Setting parameter message for folder:', p.folder);
+          const msg = `\n\n**IMPORTANT: Folder Parameter**\nThe folder parameter has been set to: "${p.folder}"\nYou MUST only analyze files from the "${p.folder}" subfolder within manual_sources. Do NOT explore other subfolders or use list_manual_sources_files to browse. Only read files from "${p.folder}/" when using the read_file_from_manual_sources tool.`;
+          console.log('[AgentRunner] Parameter message created:', msg);
+          return msg;
+        }
+        console.log('[AgentRunner] ❌ No folder parameter found in this.agentParams');
+        return '';
+      },
+
+      'weekly-recap': () => {
+        const businessFolder = p.manualSourcesFolder || p.folder;
+        return businessFolder
+          ? `\n\n**IMPORTANT: Business Metrics Folder**\nUse the "${businessFolder}" subfolder within manual_sources for the Business Metrics section. Use list_manual_sources_files to discover files, then read_file_from_manual_sources to read closed lost deals, won deals, or other business data.${p.manualSourcesFolder ? ` (The manual_sources tools are scoped to "${businessFolder}".)` : ''}`
+          : '';
+      },
+
+      '1-1': () => p.email
+        ? `\n\n**IMPORTANT: Email Parameter**\nThe email address for the 1-1 person is: ${p.email}\nPlease use this email to find the person in config.team["1-1s"] and gather their information (name, role, relationship type, Slack ID, Slack DM channel ID) to prepare for the 1-1 meeting.`
+        : `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the 1-1 person before proceeding. The email must match someone in config.team["1-1s"].`,
+
+      'epp': () => p.email
+        ? `\n\n**IMPORTANT: Email Parameter**\nThe email address for the Employee Personality Profile is: ${p.email}\nPlease use this email to:\n1. Find the person's information from config.team.ovTeamMembers, config.team.OVEntireTeam, or config.team["1-1s"]\n2. Get their Slack ID (slackId) from the config\n3. If not found in config, use Slack MCP tools to search for the user by email\n4. Analyze all their Slack messages, contributions, comments, actions, and responses in the specified date range\n5. Generate a comprehensive personality profile using Myers-Briggs and Insights Discovery frameworks.`
+        : `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to analyze before proceeding. The email can match someone in the team configuration (config.team.ovTeamMembers, config.team.OVEntireTeam, or config.team["1-1s"]), or you can search for them using Slack MCP tools.`,
+
+      'weekly-executive-summary': () => {
+        console.log('[AgentRunner] Processing weekly-executive-summary agent. this.agentParams:', p);
+        console.log('[AgentRunner] this.agentParams.week value:', p.week);
+        if (p.week) {
+          console.log('[AgentRunner] ✅ Week parameter found! Setting parameter message for week:', p.week);
+          const weekInfo = parseCalendarWeek(p.week);
+          if (weekInfo) {
+            const dateRange = getCalendarWeekDateRange(weekInfo.week, weekInfo.year);
+            const msg = `\n\n**IMPORTANT: Calendar Week Parameter**\nThe calendar week parameter has been set to: "${p.week}" (Week ${weekInfo.week}, ${weekInfo.year})\nThe date range for this week is: ${dateRange.startDate} (Monday) to ${dateRange.endDate} (Sunday).\nYou MUST find all report files created during this week (where the date portion YYYY-MM-DD in the filename falls within ${dateRange.startDate} to ${dateRange.endDate}). Use the list_reports_in_week tool to find reports for this week, then use read_report_file to extract "One-Line Executive Summary" and "tl;dr" sections from each report.`;
+            console.log('[AgentRunner] Parameter message created with date range:', dateRange);
+            return msg;
+          }
+          console.log('[AgentRunner] ❌ Invalid week parameter format');
+          return `\n\n**IMPORTANT: Invalid Week Parameter**\nThe week parameter "${p.week}" is invalid. Expected format: "week 1" or "week 1 2025". Please inform the user to provide a valid week parameter.`;
+        }
+        console.log('[AgentRunner] ❌ No week parameter found in this.agentParams');
+        return `\n\n**IMPORTANT: Week Parameter Required**\nNo calendar week was provided. Please ask the user for the calendar week (e.g., "week 1" or "week 1 2025") before proceeding. The week format should be "week N" or "week N YYYY" where N is the week number (1-53) and YYYY is the year (if not provided, current year is assumed).`;
+      },
+
+      'tts': () => {
+        console.log('[AgentRunner] Processing tts agent. this.agentParams:', p);
+        console.log('[AgentRunner] this.agentParams.reportFile value:', p.reportFile);
+        if (p.reportFile) {
+          console.log('[AgentRunner] ✅ Report file parameter found! Setting parameter message for report file:', p.reportFile);
+          const msg = `\n\n**IMPORTANT: Report File Parameter**\nThe report file parameter has been set to: "${p.reportFile}"\nYou MUST read this specific report file and convert it to speech. The file path is: ${p.reportFile}\nUse the Read tool to read the report file, then summarize it for narration, and use the Hume AI TTS tool (mcp__hume__tts) to convert it to speech.`;
+          console.log('[AgentRunner] Parameter message created for report file');
+          return msg;
+        }
+        console.log('[AgentRunner] ❌ No report file parameter found in this.agentParams');
+        return `\n\n**IMPORTANT: Report File Parameter Required**\nNo report file path was provided. Please ask the user for the report file path before proceeding. The file path should be a markdown file (e.g., "reports/business-health-2025-01-12-10-30-00.md").`;
+      },
+
+      'mixpanel-query': () => {
+        console.log('[AgentRunner] Processing mixpanel-query agent. this.agentParams:', p);
+        console.log('[AgentRunner] this.agentParams.insightIds value (raw):', p.insightIds);
+        console.log('[AgentRunner] this.agentParams.insightIds type:', typeof p.insightIds);
+        if (p.insightIds) {
+          console.log('[AgentRunner] ✅ Insight IDs parameter found! Overriding default config values:', p.insightIds);
+          const insightIdsArray = String(p.insightIds).split(',').map(id => id.trim()).filter(id => id.length > 0);
+          console.log('[AgentRunner] Parsed insightIds array:', insightIdsArray);
+          console.log('[AgentRunner] Number of insight IDs:', insightIdsArray.length);
+          const msg = `\n\n**IMPORTANT: Insight IDs Parameter**\nThe insight IDs parameter has been set to: "${p.insightIds}"\nYou MUST query ONLY these specific insight reports (bookmark IDs): ${insightIdsArray.join(', ')}\nDO NOT use the default config values - use only the insight IDs provided in this parameter.\nFor each insight report, include a link to the Mixpanel chart: https://mixpanel.com/project/{projectId}/view/{workspaceId}/app/insights/?discover=1#report/{bookmarkId}`;
+          console.log('[AgentRunner] Parameter message created for insight IDs');
+          return msg;
+        }
+        console.log('[AgentRunner] No insight IDs parameter found - will use default config values from config["mixpanel-insights"]');
+        return '';
+      },
+
+      'performance-review-q3': () => {
+        console.log('[AgentRunner] Processing performance-review-q3 agent. this.agentParams:', p);
+        console.log('[AgentRunner] this.agentParams.email value:', p.email);
+        if (p.email) {
+          console.log('[AgentRunner] ✅ Email parameter found! Setting parameter message for email:', p.email);
+          const msg = `\n\n**IMPORTANT: Email Parameter**\nThe email address for the performance review is: ${p.email}\nPlease use this email to:\n1. Find the person's Slack ID from config.team.ovTeamMembers or config.team.OVEntireTeam\n2. Locate their specific folder in manual_sources/wpm/${p.email}/\n3. Search for their activity in Slack, Jira, and Confluence during Q3 2025 (October 1 - December 31, 2025)\n4. Generate a comprehensive performance review following the Workleap Performance Cycle questionnaire format.`;
+          console.log('[AgentRunner] Parameter message created for performance review');
+          return msg;
+        }
+        console.log('[AgentRunner] ❌ No email parameter found in this.agentParams');
+        return `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to review before proceeding. The email should match someone in the team configuration (config.team.ovTeamMembers or config.team.OVEntireTeam).`;
+      },
+
+      'feature-telemetry-tracking': () => {
+        const rawFeature = p.feature;
+        const featureKeyTrimmed = typeof rawFeature === 'string' ? rawFeature.trim() : (rawFeature ? String(rawFeature).trim() : '');
+        const releases = this.config.releases || {};
+        let release = featureKeyTrimmed ? releases[featureKeyTrimmed] : null;
+        let featureKey = featureKeyTrimmed;
+        // If no release by key, try matching by display name (e.g. "Help me reply" -> help_me_reply)
+        if (!release && featureKeyTrimmed) {
+          const entry = Object.entries(releases).find(
+            ([k, r]) => (r.name || k).toLowerCase() === featureKeyTrimmed.toLowerCase()
+          );
+          if (entry) { featureKey = entry[0]; release = entry[1]; }
+        }
+        console.log('[AgentRunner] feature-telemetry-tracking param:', rawFeature, 'trimmed:', featureKeyTrimmed, 'resolved key:', featureKey, 'release found:', !!release);
+        if (featureKey && release) {
+          const featureName = release.name || featureKey;
+          const telemetry = release.telemetry;
+          const telemetryStr = Array.isArray(telemetry) ? telemetry.join(', ') : (typeof telemetry === 'string' ? telemetry : 'None');
+          return `\n\n**IMPORTANT: Feature Parameter**\nThe selected feature is: "${featureName}" (key: ${featureKey}).\nUse ONLY this feature's telemetry for the report.\n**Telemetry (report IDs or URL) for this feature**: ${telemetryStr || 'None (no report IDs configured)'}\nIf telemetry is a comma-separated list of numeric IDs, query each as a Mixpanel insight bookmark. If it is a single URL, include that link in the report and use it as the feature report reference.\nCompare feature usage to overall MAU (from config["mixpanel-insights"].mau) and compute feature adoption % where possible.`;
+        }
+        const availableKeys = Object.keys(releases).slice(0, 10).join(', ');
+        return `\n\n**IMPORTANT: Feature Parameter Required**\nNo valid feature was provided (received: "${featureKeyTrimmed || 'missing'}"). The feature must be one of the release keys from config.releases. Available keys include: ${availableKeys}${Object.keys(releases).length > 10 ? '...' : ''}. Please ask the user to select a feature from the releases list.`;
+      },
+    };
+
+    return builders[agentName]?.() ?? '';
+  }
+
+  /**
    * Execute an agent
    */
   async runAgent(agentName) {
@@ -360,152 +539,7 @@ export class AgentRunner {
     this.contextMessage = this.buildContextMessage(agentName);
 
     // Build parameter message for agents that need it
-    let parameterMessage = '';
-    if (agentName === 'slack-user-analysis') {
-      if (this.agentParams.slackUserId) {
-        parameterMessage = `\n\n**IMPORTANT: Slack User ID Parameter**\nThe Slack user ID to analyze is: ${this.agentParams.slackUserId}\nPlease use this user ID to search for their messages and analyze their contributions.`;
-      } else {
-        parameterMessage = `\n\n**IMPORTANT: Slack User ID Parameter Required**\nNo Slack user ID was provided. Please ask the user for the Slack user ID before proceeding with the analysis. The Slack user ID format is typically "U" followed by alphanumeric characters (e.g., "U01234567AB").`;
-      }
-    }
-
-    if (agentName === 'business-health') {
-      if (this.agentParams.manualSourcesFolder) {
-        parameterMessage = `\n\n**IMPORTANT: Manual Sources Folder Parameter**\nThe folder to use for manual sources is: "${this.agentParams.manualSourcesFolder}"\nPlease use files from the "${this.agentParams.manualSourcesFolder}" subfolder within manual_sources. When using the read_file_from_manual_sources tool, specify filenames relative to this folder (e.g., if folder is "Week 1" and file is "ARR OV.xlsx", use filename "ARR OV.xlsx" or "Week 1/ARR OV.xlsx").`;
-      }
-    }
-
-    if (agentName === 'telemetry-deepdive') {
-      console.log('[AgentRunner] Processing telemetry-deepdive agent. this.agentParams:', this.agentParams);
-      console.log('[AgentRunner] this.agentParams.folder value:', this.agentParams.folder);
-      if (this.agentParams.folder) {
-        console.log('[AgentRunner] ✅ Folder parameter found! Setting parameter message for folder:', this.agentParams.folder);
-        parameterMessage = `\n\n**IMPORTANT: Folder Parameter**\nThe folder parameter has been set to: "${this.agentParams.folder}"\nYou MUST only analyze files from the "${this.agentParams.folder}" subfolder within manual_sources. Do NOT explore other subfolders or use list_manual_sources_files to browse. Only read files from "${this.agentParams.folder}/" when using the read_file_from_manual_sources tool.`;
-        console.log('[AgentRunner] Parameter message created:', parameterMessage);
-      } else {
-        console.log('[AgentRunner] ❌ No folder parameter found in this.agentParams');
-      }
-    }
-
-    if (agentName === 'weekly-recap') {
-      const businessFolder = this.agentParams.manualSourcesFolder || this.agentParams.folder;
-      if (businessFolder) {
-        parameterMessage = `\n\n**IMPORTANT: Business Metrics Folder**\nUse the "${businessFolder}" subfolder within manual_sources for the Business Metrics section. Use list_manual_sources_files to discover files, then read_file_from_manual_sources to read closed lost deals, won deals, or other business data.${this.agentParams.manualSourcesFolder ? ` (The manual_sources tools are scoped to "${businessFolder}".)` : ''}`;
-      }
-    }
-
-    if (agentName === '1-1') {
-      if (this.agentParams.email) {
-        parameterMessage = `\n\n**IMPORTANT: Email Parameter**\nThe email address for the 1-1 person is: ${this.agentParams.email}\nPlease use this email to find the person in config.team["1-1s"] and gather their information (name, role, relationship type, Slack ID, Slack DM channel ID) to prepare for the 1-1 meeting.`;
-      } else {
-        parameterMessage = `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the 1-1 person before proceeding. The email must match someone in config.team["1-1s"].`;
-      }
-    }
-
-    if (agentName === 'epp') {
-      if (this.agentParams.email) {
-        parameterMessage = `\n\n**IMPORTANT: Email Parameter**\nThe email address for the Employee Personality Profile is: ${this.agentParams.email}\nPlease use this email to:\n1. Find the person's information from config.team.ovTeamMembers, config.team.OVEntireTeam, or config.team["1-1s"]\n2. Get their Slack ID (slackId) from the config\n3. If not found in config, use Slack MCP tools to search for the user by email\n4. Analyze all their Slack messages, contributions, comments, actions, and responses in the specified date range\n5. Generate a comprehensive personality profile using Myers-Briggs and Insights Discovery frameworks.`;
-      } else {
-        parameterMessage = `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to analyze before proceeding. The email can match someone in the team configuration (config.team.ovTeamMembers, config.team.OVEntireTeam, or config.team["1-1s"]), or you can search for them using Slack MCP tools.`;
-      }
-    }
-
-    if (agentName === 'weekly-executive-summary') {
-      console.log('[AgentRunner] Processing weekly-executive-summary agent. this.agentParams:', this.agentParams);
-      console.log('[AgentRunner] this.agentParams.week value:', this.agentParams.week);
-      if (this.agentParams.week) {
-        console.log('[AgentRunner] ✅ Week parameter found! Setting parameter message for week:', this.agentParams.week);
-        // Parse week to get date range for context
-        const weekInfo = parseCalendarWeek(this.agentParams.week);
-        if (weekInfo) {
-          const dateRange = getCalendarWeekDateRange(weekInfo.week, weekInfo.year);
-          parameterMessage = `\n\n**IMPORTANT: Calendar Week Parameter**\nThe calendar week parameter has been set to: "${this.agentParams.week}" (Week ${weekInfo.week}, ${weekInfo.year})\nThe date range for this week is: ${dateRange.startDate} (Monday) to ${dateRange.endDate} (Sunday).\nYou MUST find all report files created during this week (where the date portion YYYY-MM-DD in the filename falls within ${dateRange.startDate} to ${dateRange.endDate}). Use the list_reports_in_week tool to find reports for this week, then use read_report_file to extract "One-Line Executive Summary" and "tl;dr" sections from each report.`;
-          console.log('[AgentRunner] Parameter message created with date range:', dateRange);
-        } else {
-          parameterMessage = `\n\n**IMPORTANT: Invalid Week Parameter**\nThe week parameter "${this.agentParams.week}" is invalid. Expected format: "week 1" or "week 1 2025". Please inform the user to provide a valid week parameter.`;
-          console.log('[AgentRunner] ❌ Invalid week parameter format');
-        }
-      } else {
-        console.log('[AgentRunner] ❌ No week parameter found in this.agentParams');
-        parameterMessage = `\n\n**IMPORTANT: Week Parameter Required**\nNo calendar week was provided. Please ask the user for the calendar week (e.g., "week 1" or "week 1 2025") before proceeding. The week format should be "week N" or "week N YYYY" where N is the week number (1-53) and YYYY is the year (if not provided, current year is assumed).`;
-      }
-    }
-
-    if (agentName === 'tts') {
-      console.log('[AgentRunner] Processing tts agent. this.agentParams:', this.agentParams);
-      console.log('[AgentRunner] this.agentParams.reportFile value:', this.agentParams.reportFile);
-      if (this.agentParams.reportFile) {
-        console.log('[AgentRunner] ✅ Report file parameter found! Setting parameter message for report file:', this.agentParams.reportFile);
-        parameterMessage = `\n\n**IMPORTANT: Report File Parameter**\nThe report file parameter has been set to: "${this.agentParams.reportFile}"\nYou MUST read this specific report file and convert it to speech. The file path is: ${this.agentParams.reportFile}\nUse the Read tool to read the report file, then summarize it for narration, and use the Hume AI TTS tool (mcp__hume__tts) to convert it to speech.`;
-        console.log('[AgentRunner] Parameter message created for report file');
-      } else {
-        console.log('[AgentRunner] ❌ No report file parameter found in this.agentParams');
-        parameterMessage = `\n\n**IMPORTANT: Report File Parameter Required**\nNo report file path was provided. Please ask the user for the report file path before proceeding. The file path should be a markdown file (e.g., "reports/business-health-2025-01-12-10-30-00.md").`;
-      }
-    }
-
-    if (agentName === 'mixpanel-query') {
-      console.log('[AgentRunner] Processing mixpanel-query agent. this.agentParams:', this.agentParams);
-      console.log('[AgentRunner] this.agentParams.insightIds value (raw):', this.agentParams.insightIds);
-      console.log('[AgentRunner] this.agentParams.insightIds type:', typeof this.agentParams.insightIds);
-      if (this.agentParams.insightIds) {
-        console.log('[AgentRunner] ✅ Insight IDs parameter found! Overriding default config values:', this.agentParams.insightIds);
-        // Parse comma-separated list - handle both comma and comma+space separators
-        const insightIdsArray = String(this.agentParams.insightIds)
-          .split(',')
-          .map(id => id.trim())
-          .filter(id => id.length > 0);
-        console.log('[AgentRunner] Parsed insightIds array:', insightIdsArray);
-        console.log('[AgentRunner] Number of insight IDs:', insightIdsArray.length);
-        parameterMessage = `\n\n**IMPORTANT: Insight IDs Parameter**\nThe insight IDs parameter has been set to: "${this.agentParams.insightIds}"\nYou MUST query ONLY these specific insight reports (bookmark IDs): ${insightIdsArray.join(', ')}\nDO NOT use the default config values - use only the insight IDs provided in this parameter.\nFor each insight report, include a link to the Mixpanel chart: https://mixpanel.com/project/{projectId}/view/{workspaceId}/app/insights/?discover=1#report/{bookmarkId}`;
-        console.log('[AgentRunner] Parameter message created for insight IDs');
-      } else {
-        console.log('[AgentRunner] No insight IDs parameter found - will use default config values from config["mixpanel-insights"]');
-      }
-    }
-
-    if (agentName === 'performance-review-q3') {
-      console.log('[AgentRunner] Processing performance-review-q3 agent. this.agentParams:', this.agentParams);
-      console.log('[AgentRunner] this.agentParams.email value:', this.agentParams.email);
-      if (this.agentParams.email) {
-        console.log('[AgentRunner] ✅ Email parameter found! Setting parameter message for email:', this.agentParams.email);
-        parameterMessage = `\n\n**IMPORTANT: Email Parameter**\nThe email address for the performance review is: ${this.agentParams.email}\nPlease use this email to:\n1. Find the person's Slack ID from config.team.ovTeamMembers or config.team.OVEntireTeam\n2. Locate their specific folder in manual_sources/wpm/${this.agentParams.email}/\n3. Search for their activity in Slack, Jira, and Confluence during Q3 2025 (October 1 - December 31, 2025)\n4. Generate a comprehensive performance review following the Workleap Performance Cycle questionnaire format.`;
-        console.log('[AgentRunner] Parameter message created for performance review');
-      } else {
-        console.log('[AgentRunner] ❌ No email parameter found in this.agentParams');
-        parameterMessage = `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to review before proceeding. The email should match someone in the team configuration (config.team.ovTeamMembers or config.team.OVEntireTeam).`;
-      }
-    }
-
-    if (agentName === 'feature-telemetry-tracking') {
-      const rawFeature = this.agentParams.feature;
-      const featureKeyTrimmed = typeof rawFeature === 'string' ? rawFeature.trim() : (rawFeature ? String(rawFeature).trim() : '');
-      const releases = this.config.releases || {};
-      let release = featureKeyTrimmed ? releases[featureKeyTrimmed] : null;
-      let featureKey = featureKeyTrimmed;
-      // If no release by key, try matching by display name (e.g. "Help me reply" -> help_me_reply)
-      if (!release && featureKeyTrimmed) {
-        const entry = Object.entries(releases).find(
-          ([k, r]) => (r.name || k).toLowerCase() === featureKeyTrimmed.toLowerCase()
-        );
-        if (entry) {
-          featureKey = entry[0];
-          release = entry[1];
-        }
-      }
-      console.log('[AgentRunner] feature-telemetry-tracking param:', rawFeature, 'trimmed:', featureKeyTrimmed, 'resolved key:', featureKey, 'release found:', !!release);
-      if (featureKey && release) {
-        const featureName = release.name || featureKey;
-        const telemetry = release.telemetry;
-        const telemetryStr = Array.isArray(telemetry)
-          ? telemetry.join(', ')
-          : (typeof telemetry === 'string' ? telemetry : 'None');
-        parameterMessage = `\n\n**IMPORTANT: Feature Parameter**\nThe selected feature is: "${featureName}" (key: ${featureKey}).\nUse ONLY this feature's telemetry for the report.\n**Telemetry (report IDs or URL) for this feature**: ${telemetryStr || 'None (no report IDs configured)'}\nIf telemetry is a comma-separated list of numeric IDs, query each as a Mixpanel insight bookmark. If it is a single URL, include that link in the report and use it as the feature report reference.\nCompare feature usage to overall MAU (from config["mixpanel-insights"].mau) and compute feature adoption % where possible.`;
-      } else {
-        const availableKeys = Object.keys(releases).slice(0, 10).join(', ');
-        parameterMessage = `\n\n**IMPORTANT: Feature Parameter Required**\nNo valid feature was provided (received: "${featureKeyTrimmed || 'missing'}"). The feature must be one of the release keys from config.releases. Available keys include: ${availableKeys}${Object.keys(releases).length > 10 ? '...' : ''}. Please ask the user to select a feature from the releases list.`;
-      }
-    }
+    const parameterMessage = this.buildParameterMessage(agentName);
 
     let messages = [
       {
@@ -870,7 +904,7 @@ export class AgentRunner {
 
         // Get next response with rate limiting
         // Add extra delay after tool execution to prevent rapid-fire requests
-        await this.sleep(RATE_LIMITING.TOOL_EXECUTION_DELAY);
+        await sleep(RATE_LIMITING.TOOL_EXECUTION_DELAY);
 
         // Final check after adding messages - truncate if needed
         const finalEstimatedTokens = this.messageTruncator.estimateTokenCount(messages, tools);

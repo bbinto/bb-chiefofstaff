@@ -29,18 +29,15 @@ function Settings({ password, onBack }) {
 
   const localOllamaModels = [
     { value: 'mistral', label: 'Mistral 7B (Fast, Good quality)' },
-    { value: 'neural-chat', label: 'Neural Chat 7B (Fast, Instruction-tuned)' },
-    { value: 'openchat', label: 'OpenChat 8B (Fast, Lightweight)' },
-    { value: 'dolphin-mixtral', label: 'Dolphin Mixtral 8x7B (Slow, High quality)' },
-    { value: 'llama2', label: 'Llama 2 13B (Medium, Good reasoning)' },
-    { value: 'neural-chat:latest', label: 'Neural Chat Latest' },
+
   ]
 
   const cloudOllamaModels = [
     { value: 'gpt-oss:120b-cloud', label: 'GPT-OSS 120B (Cloud, High quality)' },
     { value: 'qwen3-vl:235b-cloud', label: 'Qwen3 VL 235B (Cloud, Vision + Language)' },
-    { value: 'llama3.3:70b-cloud', label: 'Llama 3.3 70B (Cloud, High quality)' },
-    { value: 'qwen2.5:72b-cloud', label: 'Qwen 2.5 72B (Cloud, Multilingual)' },
+    { value: 'deepseek-v3.1:671b-cloud', label: 'DeepSeek V3.1 671B (Cloud, High quality)' },
+    { value: 'nemotron-3-nano:30b-cloud', label: 'Nemotron 3 Nano 30B (Cloud, Low latency)' },
+
   ]
 
   useEffect(() => {
@@ -392,9 +389,9 @@ function Settings({ password, onBack }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 >
                   <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Default — cheapest, best rate limits)</option>
-                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Newer, 15 RPM / 1000 RPD free)</option>
                   <option value="gemini-2.0-flash">Gemini 2.0 Flash (Better quality, higher cost)</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Best quality flash, 10 RPM / 250 RPD free)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Best quality flash)</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Highest quality)</option>
                   <option value="gemini-1.5-flash">Gemini 1.5 Flash (Legacy, fast)</option>
                 </select>
                 <p className="text-xs text-gray-600 mt-1">

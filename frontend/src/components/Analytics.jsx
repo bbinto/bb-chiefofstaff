@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import ReportComparison from './ReportComparison'
 
 // Get API URL from environment variable, fallback to relative URL (uses proxy)
 const API_URL = import.meta.env.VITE_API_URL || ''
@@ -8,6 +9,7 @@ function Analytics({ password, onBack }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [timeRange, setTimeRange] = useState('all') // all, 7d, 30d, 90d
+  const [activeTab, setActiveTab] = useState('cost') // cost | compare
 
   useEffect(() => {
     console.log('Analytics component mounted')
@@ -163,28 +165,58 @@ function Analytics({ password, onBack }) {
           </button>
         </div>
 
-        {/* Time Range Filter */}
-        <div className="flex gap-2">
-          {[
-            { value: 'all', label: 'All Time' },
-            { value: '7d', label: 'Last 7 Days' },
-            { value: '30d', label: 'Last 30 Days' },
-            { value: '90d', label: 'Last 90 Days' }
-          ].map(option => (
-            <button
-              key={option.value}
-              onClick={() => setTimeRange(option.value)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                timeRange === option.value
-                  ? 'bg-[#00203F] text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+        {/* Time Range Filter — only shown on cost tab */}
+        {activeTab === 'cost' && (
+          <div className="flex gap-2">
+            {[
+              { value: 'all', label: 'All Time' },
+              { value: '7d', label: 'Last 7 Days' },
+              { value: '30d', label: 'Last 30 Days' },
+              { value: '90d', label: 'Last 90 Days' }
+            ].map(option => (
+              <button
+                key={option.value}
+                onClick={() => setTimeRange(option.value)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  timeRange === option.value
+                    ? 'bg-[#00203F] text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border border-gray-300'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-gray-200">
+        {[
+          { id: 'cost', label: 'Cost Analytics' },
+          { id: 'compare', label: 'Report Comparison' },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-5 py-2.5 text-sm font-medium rounded-t-lg transition-colors -mb-px border-b-2 ${
+              activeTab === tab.id
+                ? 'border-[#00203F] text-[#00203F] bg-white'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Report Comparison tab */}
+      {activeTab === 'compare' && (
+        <ReportComparison password={password} reports={reports} />
+      )}
+
+      {/* Cost Analytics tab — everything below is shown only on cost tab */}
+      {activeTab === 'cost' && (<>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -478,6 +510,7 @@ function Analytics({ password, onBack }) {
           )}
         </div>
       </div>
+      </>)}
     </div>
   )
 }
