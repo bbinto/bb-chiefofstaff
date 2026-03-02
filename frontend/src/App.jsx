@@ -7,6 +7,7 @@ import AgentRunner from './components/AgentRunner'
 import Analytics from './components/Analytics'
 import MCPStatus from './components/MCPStatus'
 import Settings from './components/Settings'
+import Upload from './components/Upload'
 import mariLogo from './img/mari-128.png'
 
 // Get API URL from environment variable, fallback to relative URL (uses proxy)
@@ -27,6 +28,7 @@ function App() {
   const [showAnalytics, setShowAnalytics] = useState(false)
   const [showMCPStatus, setShowMCPStatus] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showUpload, setShowUpload] = useState(false)
 
   useEffect(() => {
     // Check if password is stored in sessionStorage
@@ -266,6 +268,16 @@ function App() {
               </button>
 
               <button
+                onClick={() => setShowUpload(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <span className="font-medium text-sm">Upload</span>
+              </button>
+
+              <button
                 onClick={() => {
                   console.log('Analytics button clicked')
                   setShowAnalytics(true)
@@ -304,7 +316,12 @@ function App() {
       </header>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        {showSettings ? (
+        {showUpload ? (
+          <Upload
+            password={password}
+            onBack={() => setShowUpload(false)}
+          />
+        ) : showSettings ? (
           <Settings
             password={password}
             onBack={() => setShowSettings(false)}

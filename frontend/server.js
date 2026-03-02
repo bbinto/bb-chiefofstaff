@@ -3,6 +3,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
 import { extractOneLineSummary, extractInsights } from '../src/utils/summary-extractor.js';
 import { FRONTEND, PATHS } from '../src/utils/constants.js';
 
@@ -1637,6 +1638,154 @@ app.post('/api/mcp-clear-cache', async (req, res) => {
     });
   }
 });
+
+// ─── Manual Sources Upload ────────────────────────────────────────────────────
+
+const MANUAL_SOURCES_DIR = path.join(__dirname, '..', 'manual_sources');
+
+// Week folder validation: only "week" followed by 1–3 digits (case-insensitive)
+function isValidWeekFolder(name) {
+  return /^week\d{1,3}$/i.test(name);
+}
+
+// Allowed upload extensions
+const ALLOWED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv', '.pdf', '.png', '.jpg', '.jpeg']);
+
+// Multer storage — destination and filename resolved at request time
+const uploadStorage = multer.diskStorage({
+  destination(req, file, cb) {
+    const week = (req.params.week || '').trim().toLowerCase();
+    if (!isValidWeekFolder(week)) {
+      return cb(new Error('Invalid week folder name'));
+    }
+    const dest = path.join(MANUAL_SOURCES_DIR, week);
+    // Ensure it stays inside manual_sources
+    const resolved = path.resolve(dest);
+    const base = path.resolve(MANUAL_SOURCES_DIR);
+    if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+      return cb(new Error('Path traversal detected'));
+    }
+    fs.mkdirSync(dest, { recursive: true });
+    cb(null, dest);
+  },
+  filename(req, file, cb) {
+    // Strip any path components, keep only the base filename
+    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9.\-_ ()[\]]/g, '_');
+    const ext = path.extname(safeName).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return cb(new Error(`File type not allowed: ${ext}`));
+    }
+    cb(null, safeName);
+  }
+});
+
+const upload = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB per file
+  fileFilter(req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return cb(new Error(`File type not allowed: ${ext}`));
+    }
+    cb(null, true);
+  }
+});
+
+// POST /api/upload/:week — upload one or more files into manual_sources/<week>/
+app.post('/api/upload/:week', (req, res) => {
+  const week = (req.params.week || '').trim().toLowerCase();
+  if (!isValidWeekFolder(week)) {
+    return res.status(400).json({ error: 'Invalid week folder. Use format: week1, week9, week10, etc.' });
+  }
+
+  upload.array('files', 20)(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'File too large. Maximum size is 25 MB.' });
+      }
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    }
+    if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files received.' });
+    }
+    const uploaded = req.files.map(f => ({ name: f.filename, size: f.size }));
+    res.json({ success: true, week, files: uploaded });
+  });
+});
+
+// GET /api/upload/:week — list files in manual_sources/<week>/
+app.get('/api/upload/:week', (req, res) => {
+  const week = (req.params.week || '').trim().toLowerCase();
+  if (!isValidWeekFolder(week)) {
+    return res.status(400).json({ error: 'Invalid week folder name.' });
+  }
+  const dir = path.join(MANUAL_SOURCES_DIR, week);
+  if (!fs.existsSync(dir)) {
+    return res.json({ week, files: [] });
+  }
+  const files = fs.readdirSync(dir)
+    .filter(f => {
+      const ext = path.extname(f).toLowerCase();
+      return ALLOWED_EXTENSIONS.has(ext);
+    })
+    .map(f => {
+      const stat = fs.statSync(path.join(dir, f));
+      return { name: f, size: stat.size, modified: stat.mtime };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ week, files });
+});
+
+// DELETE /api/upload/:week/:filename — remove a single file
+app.delete('/api/upload/:week/:filename', (req, res) => {
+  const week = (req.params.week || '').trim().toLowerCase();
+  const filename = path.basename(req.params.filename || '');
+  if (!isValidWeekFolder(week)) {
+    return res.status(400).json({ error: 'Invalid week folder name.' });
+  }
+  if (!filename) {
+    return res.status(400).json({ error: 'Invalid filename.' });
+  }
+  const ext = path.extname(filename).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    return res.status(400).json({ error: 'File type not allowed.' });
+  }
+  const filePath = path.join(MANUAL_SOURCES_DIR, week, filename);
+  // Prevent traversal: resolved path must stay inside manual_sources/<week>
+  const resolved = path.resolve(filePath);
+  const base = path.resolve(path.join(MANUAL_SOURCES_DIR, week));
+  if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+    return res.status(400).json({ error: 'Path traversal detected.' });
+  }
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found.' });
+  }
+  fs.unlinkSync(filePath);
+  res.json({ success: true, deleted: filename });
+});
+
+// GET /api/upload-weeks — list all existing week folders in manual_sources
+app.get('/api/upload-weeks', (req, res) => {
+  if (!fs.existsSync(MANUAL_SOURCES_DIR)) {
+    return res.json({ weeks: [] });
+  }
+  const weeks = fs.readdirSync(MANUAL_SOURCES_DIR)
+    .filter(entry => {
+      if (!isValidWeekFolder(entry)) return false;
+      return fs.statSync(path.join(MANUAL_SOURCES_DIR, entry)).isDirectory();
+    })
+    .sort((a, b) => {
+      const na = parseInt(a.replace(/\D/g, ''), 10);
+      const nb = parseInt(b.replace(/\D/g, ''), 10);
+      return nb - na; // newest first
+    });
+  res.json({ weeks });
+});
+
+// ─── End Manual Sources Upload ────────────────────────────────────────────────
 
 // Handle client-side routing - serve index.html for .md URLs
 app.get('/*.md', (req, res) => {

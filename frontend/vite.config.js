@@ -5,17 +5,18 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
-    host: '10.88.111.48',
+    host: '0.0.0.0',
+    allowedHosts: ['hyperconscientious-mel-exhaustingly.ngrok-free.dev'],
     proxy: {
       '/api': {
-        target: 'http://10.88.111.48:3001',
+        target: 'http://localhost:3001',
         changeOrigin: true
       }
     }
   },
   preview: {
     port: 3000,
-    host: '10.88.111.48'
+    host: '0.0.0.0'
   }
 })
 

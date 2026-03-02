@@ -30,7 +30,9 @@ function AgentRunner({ password, onClose }) {
     { name: 'weekly-executive-summary', category: 'Prep',  displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
     { name: 'good-vibes-recognition', category: 'Team', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null },
     { name: 'icp-inspector', category: 'Business', displayName: 'ICP Inspector', description: 'Cross-check CRM companies (20–250 seats) with Gong calls and VoC; split by closed won/lost', lastRun: null },
-    
+    { name: 'feature-insights', category: 'Business', displayName: 'FY27 Feature Insights', description: 'Mine Slack, VoC, and Jira for OV/Officevibe feature requests and produce a prioritized FY27 ideas list', lastRun: null },
+    { name: 'bi-weekly-team', category: 'Team', displayName: 'Bi-Weekly Team Meeting', description: 'Prepare a short agenda doc for the OV bi-weekly sync: attendance, business health, eng highlights, and discussion topics', requiresParam: 'manualSourcesFolder', lastRun: null },
+
   ])
 
   const [selectedAgents, setSelectedAgents] = useState([])
