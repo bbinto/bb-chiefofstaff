@@ -493,6 +493,22 @@ export class AgentRunner {
         return `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to review before proceeding. The email should match someone in the team configuration (config.team.ovTeamMembers or config.team.OVEntireTeam).`;
       },
 
+      'performance-review-q4': () => {
+        console.log('[AgentRunner] Processing performance-review-q4 agent. this.agentParams:', p);
+        console.log('[AgentRunner] this.agentParams.email value:', p.email);
+        if (p.email) {
+          const member = (this.config.team?.ovTeamMembers || []).find(m => m.email === p.email)
+            || (this.config.team?.['1-1s'] || []).find(m => m.email === p.email);
+          const slackId = member?.slackId || 'unknown';
+          const name = member?.name || p.email;
+          const role = member?.role || 'unknown';
+          console.log('[AgentRunner] ✅ Email parameter found! Resolved:', { name, role, slackId });
+          return `\n\n**IMPORTANT: Q4 Performance Review Parameters**\nThe team member selected for Q4 performance review:\n- **Email**: ${p.email}\n- **Name**: ${name}\n- **Role**: ${role}\n- **Slack User ID**: ${slackId}\n\nDo NOT ask for an email address — it has already been provided above. Proceed immediately with Step 1 (confirm the person from config) and then Step 4 (scan Slack channel-by-channel using Slack User ID \`${slackId}\`).\n\nQ4 date range: 2026-01-01 to 2026-03-31.`;
+        }
+        console.log('[AgentRunner] ❌ No email parameter found in this.agentParams');
+        return `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to review before proceeding. The email should match someone in config.team.ovTeamMembers.`;
+      },
+
       'feature-telemetry-tracking': () => {
         const rawFeature = p.feature;
         const featureKeyTrimmed = typeof rawFeature === 'string' ? rawFeature.trim() : (rawFeature ? String(rawFeature).trim() : '');

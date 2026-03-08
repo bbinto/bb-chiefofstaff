@@ -1649,7 +1649,7 @@ function isValidWeekFolder(name) {
 }
 
 // Allowed upload extensions
-const ALLOWED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv', '.pdf', '.png', '.jpg', '.jpeg']);
+const ALLOWED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv', '.pdf', '.png', '.jpg', '.jpeg', '.md']);
 
 // Multer storage — destination and filename resolved at request time
 const uploadStorage = multer.diskStorage({

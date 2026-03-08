@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 
 const API_URL = import.meta.env.VITE_API_URL || ''
 
-const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.png', '.jpg', '.jpeg']
+const ALLOWED_EXTENSIONS = ['.xlsx', '.xls', '.csv', '.pdf', '.png', '.jpg', '.jpeg', '.md']
 const MAX_FILE_SIZE_MB = 25
 
 function formatBytes(bytes) {
