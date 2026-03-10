@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { RateLimiter } from './agent/rate-limiter.js';
 import { MessageTruncator } from './agent/message-truncator.js';
 import { ToolHandler } from './agent/tool-handler.js';
@@ -18,6 +19,21 @@ import {
 } from './utils/constants.js';
 import { sleep } from './utils/helpers.js';
 
+const __agentRunnerFilename = fileURLToPath(import.meta.url);
+const __agentRunnerDirname = path.dirname(__agentRunnerFilename);
+
+function loadPersistedLLMSettings() {
+  const settingsPath = path.join(__agentRunnerDirname, '..', 'llm-settings.json');
+  if (fs.existsSync(settingsPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /**
  * Agent Runner
  * Executes individual agents based on their markdown instructions
@@ -30,30 +46,36 @@ export class AgentRunner {
     this.dateRange = dateRange; // { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
     this.agentParams = agentParams; // { slackUserId: 'U...', folder: 'week1', etc. }
     
-    // Detect which LLM backend to use
-    this.useOllama = process.env.USE_OLLAMA === 'true';
-    this.useGemini = process.env.USE_GEMINI === 'true';
+    // Detect which LLM backend to use.
+    // If the caller (e.g. cron job) didn't explicitly set USE_GEMINI/USE_OLLAMA,
+    // fall back to persisted settings saved via the frontend UI.
+    const envHasLLMConfig = process.env.USE_GEMINI !== undefined || process.env.USE_OLLAMA !== undefined;
+    const persisted = envHasLLMConfig ? null : loadPersistedLLMSettings();
+
+    this.useOllama = process.env.USE_OLLAMA === 'true' || (persisted?.useOllama ?? false);
+    this.useGemini = process.env.USE_GEMINI === 'true' || (persisted?.useGemini ?? false);
 
     if (this.useOllama) {
       console.log('🦙 Using local Ollama LLM');
+      const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || persisted?.ollamaBaseUrl || 'http://localhost:11434';
       this.anthropic = new OpenAI({
-        apiKey: process.env.OLLAMA_API_KEY || 'dummy-key',
-        baseURL: 'http://localhost:11434/v1'
+        apiKey: process.env.OLLAMA_API_KEY || persisted?.ollamaApiKey || 'dummy-key',
+        baseURL: `${ollamaBaseUrl}/v1`
       });
-      this.model = process.env.OLLAMA_MODEL || 'mistral';
+      this.model = process.env.OLLAMA_MODEL || persisted?.ollamaModel || 'mistral';
       console.log(`  Model: ${this.model}`);
-      console.log(`  Base URL: http://localhost:11434/v1`);
+      console.log(`  Base URL: ${ollamaBaseUrl}/v1`);
     } else if (this.useGemini) {
       console.log('💎 Using Google Gemini API (direct fetch)');
       this.geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY;
-      this.model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite';
+      this.model = process.env.GEMINI_MODEL || persisted?.geminiModel || 'gemini-2.0-flash-lite';
       console.log(`  Model: ${this.model}`);
     } else {
       console.log('🔑 Using Anthropic Claude API');
       this.anthropic = new Anthropic({
         apiKey: process.env.ANTHROPIC_API_KEY
       });
-      this.model = process.env.CLAUDE_MODEL || API_DEFAULTS.MODEL;
+      this.model = process.env.CLAUDE_MODEL || persisted?.claudeModel || API_DEFAULTS.MODEL;
       console.log(`  Model: ${this.model}`);
     }
 

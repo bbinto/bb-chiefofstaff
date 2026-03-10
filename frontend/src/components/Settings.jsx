@@ -10,7 +10,7 @@ function Settings({ password, onBack }) {
   // LLM Settings state
   const [llmSettings, setLlmSettings] = useState(null)
   const [llmBackend, setLlmBackend] = useState('claude') // 'claude' | 'ollama' | 'gemini'
-  const [ollamaModel, setOllamaModel] = useState('mistral')
+  const [ollamaModel, setOllamaModel] = useState('deepseek-v3.1:671b-cloud')
   const [claudeModel, setClaudeModel] = useState('claude-sonnet-4-5-20250929')
   const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash-lite')
   
@@ -28,7 +28,6 @@ function Settings({ password, onBack }) {
   const [validationError, setValidationError] = useState(null)
 
   const localOllamaModels = [
-    { value: 'mistral', label: 'Mistral 7B (Fast, Good quality)' },
 
   ]
 
@@ -37,6 +36,7 @@ function Settings({ password, onBack }) {
     { value: 'qwen3-vl:235b-cloud', label: 'Qwen3 VL 235B (Cloud, Vision + Language)' },
     { value: 'deepseek-v3.1:671b-cloud', label: 'DeepSeek V3.1 671B (Cloud, High quality)' },
     { value: 'nemotron-3-nano:30b-cloud', label: 'Nemotron 3 Nano 30B (Cloud, Low latency)' },
+    { value: 'glm-5:cloud', label: 'GLM-5 (Cloud, General purpose)' },
 
   ]
 
@@ -359,6 +359,8 @@ function Settings({ password, onBack }) {
                   onChange={(e) => setClaudeModel(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
+                  <option value="claude-opus-4-6">Claude Opus 4.6 (Arena #1 Text Today)</option>
+                  <option value="claude-opus-4-6-thinking">Claude Opus 4.6 Thinking (Arena #1 Thinking Today)</option>
                   <option value="claude-opus-4-1-20250805">Claude Opus 4.1 (Latest, Most capable)</option>
                   <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Recommended)</option>
                   <option value="claude-3-5-haiku-20241022">Claude Haiku 3.5 (Fast, Budget-friendly)</option>

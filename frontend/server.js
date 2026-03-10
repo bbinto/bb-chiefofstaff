@@ -59,15 +59,37 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
 const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || null;
 
-// LLM Settings - stored in memory (defaults from environment)
+// LLM Settings - persisted to disk and loaded on startup
+const LLM_SETTINGS_PATH = path.join(__dirname, '..', 'llm-settings.json');
+
+function loadPersistedLLMSettings() {
+  if (fs.existsSync(LLM_SETTINGS_PATH)) {
+    try {
+      return JSON.parse(fs.readFileSync(LLM_SETTINGS_PATH, 'utf-8'));
+    } catch {
+      console.warn('[LLM Settings] Failed to parse llm-settings.json, using env defaults');
+    }
+  }
+  return null;
+}
+
+function savePersistedLLMSettings(settings) {
+  try {
+    fs.writeFileSync(LLM_SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[LLM Settings] Failed to save llm-settings.json:', err.message);
+  }
+}
+
+const _persisted = loadPersistedLLMSettings();
 let llmSettings = {
-  useOllama: process.env.USE_OLLAMA === 'true',
-  useGemini: process.env.USE_GEMINI === 'true',
-  ollamaModel: process.env.OLLAMA_MODEL || 'mistral',
-  ollamaBaseUrl: 'http://localhost:11434',
-  ollamaApiKey: process.env.OLLAMA_API_KEY || '',
-  claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite'
+  useOllama: _persisted?.useOllama ?? (process.env.USE_OLLAMA === 'true'),
+  useGemini: _persisted?.useGemini ?? (process.env.USE_GEMINI === 'true'),
+  ollamaModel: _persisted?.ollamaModel ?? (process.env.OLLAMA_MODEL || 'mistral'),
+  ollamaBaseUrl: _persisted?.ollamaBaseUrl ?? 'http://localhost:11434',
+  ollamaApiKey: _persisted?.ollamaApiKey ?? (process.env.OLLAMA_API_KEY || ''),
+  claudeModel: _persisted?.claudeModel ?? (process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929'),
+  geminiModel: _persisted?.geminiModel ?? (process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite'),
 };
 
 function buildLightReportPrompt(filename, reportContent) {
@@ -1316,6 +1338,8 @@ app.put('/api/settings/llm', (req, res) => {
     if (ollamaApiKey !== undefined) llmSettings.ollamaApiKey = ollamaApiKey;
     if (claudeModel) llmSettings.claudeModel = claudeModel;
     if (geminiModel) llmSettings.geminiModel = geminiModel;
+
+    savePersistedLLMSettings(llmSettings);
 
     const activeBackend = llmSettings.useOllama ? 'Ollama' : llmSettings.useGemini ? 'Gemini' : 'Claude';
     const activeModel = llmSettings.useOllama ? llmSettings.ollamaModel : llmSettings.useGemini ? llmSettings.geminiModel : llmSettings.claudeModel;

@@ -25,6 +25,24 @@ log "==================================================================="
 log "Starting Thought Leadership Workflow"
 log "==================================================================="
 
+# Log which LLM is selected (env vars take precedence over llm-settings.json)
+if [ "${USE_OLLAMA:-}" = "true" ]; then
+  log "LLM Selected: Ollama (model: ${OLLAMA_MODEL:-from llm-settings.json})"
+elif [ "${USE_GEMINI:-}" = "true" ]; then
+  log "LLM Selected: Gemini (model: ${GEMINI_MODEL:-from llm-settings.json})"
+else
+  LLM_INFO=$(node -e "
+const fs = require('fs');
+try {
+  const s = JSON.parse(fs.readFileSync('llm-settings.json', 'utf-8'));
+  if (s.useOllama) process.stdout.write('Ollama (model: ' + s.ollamaModel + ')');
+  else if (s.useGemini) process.stdout.write('Gemini (model: ' + s.geminiModel + ')');
+  else process.stdout.write('Claude (model: ' + (s.claudeModel || 'default') + ')');
+} catch(e) { process.stdout.write('Claude (default)'); }
+" 2>/dev/null || echo "Claude (default)")
+  log "LLM Selected: $LLM_INFO"
+fi
+
 # Step 1: Generate the thought leadership report
 log "Step 1: Generating thought leadership report..."
 OUTPUT=$(npm start thoughtleadership-updates 2>&1 | tee -a "$LOG_FILE")
