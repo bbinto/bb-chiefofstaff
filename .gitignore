@@ -70,3 +70,4 @@ claude_desktop_config_dontuse.json
 OLLAMA_INTEGRATION.md
 OLLAMA_SETUP.md
 llm-settings.json
+frontend/vite.config.js
