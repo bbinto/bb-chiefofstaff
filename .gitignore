@@ -68,3 +68,4 @@ setup-daily-cron.sh
 claude_desktop_config_dontuse.json
 OLLAMA_INTEGRATION.md
 OLLAMA_SETUP.md
+llm-settings.json
