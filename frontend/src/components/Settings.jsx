@@ -12,7 +12,7 @@ function Settings({ password, onBack }) {
   const [llmBackend, setLlmBackend] = useState('claude') // 'claude' | 'ollama' | 'gemini'
   const [ollamaModel, setOllamaModel] = useState('deepseek-v3.1:671b-cloud')
   const [claudeModel, setClaudeModel] = useState('claude-sonnet-4-5-20250929')
-  const [geminiModel, setGeminiModel] = useState('gemini-2.0-flash-lite')
+  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash')
   
   // Config state
   const [config, setConfig] = useState(null)
@@ -74,7 +74,7 @@ function Settings({ password, onBack }) {
       }
       setOllamaModel(data.ollamaModel || 'mistral')
       setClaudeModel(data.claudeModel || 'claude-sonnet-4-5-20250929')
-      setGeminiModel(data.geminiModel || 'gemini-2.0-flash')
+      setGeminiModel(data.geminiModel || 'gemini-2.5-flash')
       setError(null)
     } catch (err) {
       setError(err.message)
@@ -299,29 +299,6 @@ function Settings({ password, onBack }) {
                 </div>
               </label>
 
-              {/* Gemini Option */}
-              <label className="flex items-start p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors" style={{ borderColor: llmBackend === 'gemini' ? '#3b82f6' : '#e5e7eb' }}>
-                <input
-                  type="radio"
-                  name="llm"
-                  value="gemini"
-                  checked={llmBackend === 'gemini'}
-                  onChange={() => setLlmBackend('gemini')}
-                  className="mt-1"
-                />
-                <div className="ml-4 flex-1">
-                  <div className="font-semibold text-gray-900">💎 Google Gemini API</div>
-                  <p className="text-sm text-gray-600 mt-1">Use Google&apos;s Gemini models as an alternative cloud LLM</p>
-                  <ul className="text-xs text-gray-500 mt-2 space-y-1">
-                    <li>✓ Competitive output quality</li>
-                    <li>✓ Function calling support</li>
-                    <li>✓ Generous free tier available</li>
-                    <li>❌ Requires Gemini API key</li>
-                    <li>❌ Different tool format (limited MCP support)</li>
-                  </ul>
-                </div>
-              </label>
-
               {/* Ollama Option */}
               <label className="flex items-start p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors" style={{ borderColor: llmBackend === 'ollama' ? '#3b82f6' : '#e5e7eb' }}>
                 <input
@@ -341,6 +318,29 @@ function Settings({ password, onBack }) {
                     <li>✓ Runs locally on your machine</li>
                     <li>❌ Lower output quality</li>
                     <li>❌ Limited tool support</li>
+                  </ul>
+                </div>
+              </label>
+
+              {/* Gemini Option */}
+              <label className="flex items-start p-4 border-2 border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors" style={{ borderColor: llmBackend === 'gemini' ? '#3b82f6' : '#e5e7eb' }}>
+                <input
+                  type="radio"
+                  name="llm"
+                  value="gemini"
+                  checked={llmBackend === 'gemini'}
+                  onChange={() => setLlmBackend('gemini')}
+                  className="mt-1"
+                />
+                <div className="ml-4 flex-1">
+                  <div className="font-semibold text-gray-900">💎 Google Gemini API</div>
+                  <p className="text-sm text-gray-600 mt-1">Use Google&apos;s Gemini models as an alternative cloud LLM</p>
+                  <ul className="text-xs text-gray-500 mt-2 space-y-1">
+                    <li>✓ Competitive output quality</li>
+                    <li>✓ Function calling support</li>
+                    <li>✓ Generous free tier available</li>
+                    <li>❌ Requires Gemini API key</li>
+                    <li>❌ Different tool format (limited MCP support)</li>
                   </ul>
                 </div>
               </label>
@@ -374,39 +374,6 @@ function Settings({ password, onBack }) {
 
               <div className="mt-4 p-3 bg-blue-100 rounded text-sm text-blue-800">
                 ℹ️ Your API key is configured via the <code className="bg-blue-200 px-1 rounded">ANTHROPIC_API_KEY</code> environment variable.
-              </div>
-            </div>
-          )}
-
-          {/* Gemini Configuration */}
-          {llmBackend === 'gemini' && (
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-6 space-y-4">
-              <h3 className="text-lg font-semibold text-gray-900">Gemini Configuration</h3>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
-                <select
-                  value={geminiModel}
-                  onChange={(e) => setGeminiModel(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                >
-                  <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Default — cheapest, best rate limits)</option>
-                  <option value="gemini-2.0-flash">Gemini 2.0 Flash (Better quality, higher cost)</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Best quality flash)</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Highest quality)</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Legacy, fast)</option>
-                </select>
-                <p className="text-xs text-gray-600 mt-1">
-                  💡 <strong>Flash Lite</strong> is cheapest ($0.075/$0.30 per 1M tokens) with the best free rate limits.
-                </p>
-              </div>
-
-              <div className="p-3 bg-purple-100 rounded text-sm text-purple-800">
-                ℹ️ Your API key is configured via the <code className="bg-purple-200 px-1 rounded">GOOGLE_GEMINI_API_KEY</code> environment variable.
-              </div>
-
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800 space-y-1">
-                <p>⚠️ <strong>Note:</strong> Gemini uses Google&apos;s OpenAI-compatible API endpoint. MCP tool calling works differently from Claude — some agents may have limited functionality.</p>
               </div>
             </div>
           )}
@@ -446,6 +413,38 @@ function Settings({ password, onBack }) {
             </div>
           )}
 
+          {/* Gemini Configuration */}
+          {llmBackend === 'gemini' && (
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-6 space-y-4">
+              <h3 className="text-lg font-semibold text-gray-900">Gemini Configuration</h3>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Model</label>
+                <select
+                  value={geminiModel}
+                  onChange={(e) => setGeminiModel(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                >
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Best quality flash)</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Highest quality)</option>
+                  <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Cheapest, best rate limits)</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Legacy, fast)</option>
+                </select>
+                <p className="text-xs text-gray-600 mt-1">
+                  💡 <strong>Flash 2.5</strong> offers the best balance of quality and speed.
+                </p>
+              </div>
+
+              <div className="p-3 bg-purple-100 rounded text-sm text-purple-800">
+                ℹ️ Your API key is configured via the <code className="bg-purple-200 px-1 rounded">GOOGLE_GEMINI_API_KEY</code> environment variable.
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800 space-y-1">
+                <p>⚠️ <strong>Note:</strong> Gemini uses Google&apos;s OpenAI-compatible API endpoint. MCP tool calling works differently from Claude — some agents may have limited functionality.</p>
+              </div>
+            </div>
+          )}
+
           {/* Current Status */}
           <div className="bg-gray-100 rounded-lg p-4">
             <h3 className="font-semibold text-gray-900 mb-2">Current Configuration</h3>
@@ -456,7 +455,12 @@ function Settings({ password, onBack }) {
                   {llmBackend === 'ollama' ? '🦙 Ollama' : llmBackend === 'gemini' ? '💎 Gemini' : '🔑 Claude'}
                 </span>
               </div>
-              {llmBackend === 'ollama' ? (
+              {llmBackend === 'gemini' ? (
+                <div className="flex justify-between">
+                  <span>Model:</span>
+                  <span>{geminiModel}</span>
+                </div>
+              ) : llmBackend === 'ollama' ? (
                 <>
                   <div className="flex justify-between">
                     <span>Model:</span>
@@ -467,11 +471,6 @@ function Settings({ password, onBack }) {
                     <span>http://localhost:11434</span>
                   </div>
                 </>
-              ) : llmBackend === 'gemini' ? (
-                <div className="flex justify-between">
-                  <span>Model:</span>
-                  <span>{geminiModel}</span>
-                </div>
               ) : (
                 <div className="flex justify-between">
                   <span>Model:</span>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom'
 import ReportList from './components/ReportList'
 import ReportViewer from './components/ReportViewer'
 import FilterBar from './components/FilterBar'
@@ -13,25 +14,23 @@ import mariLogo from './img/mari-128.png'
 // Get API URL from environment variable, fallback to relative URL (uses proxy)
 const API_URL = import.meta.env.VITE_API_URL || ''
 
-function App() {
+function AppContent() {
+  const navigate = useNavigate()
+  const location = useLocation()
+
   const [reports, setReports] = useState([])
   const [agents, setAgents] = useState([])
-  const [selectedReport, setSelectedReport] = useState(null)
   const [selectedAgent, setSelectedAgent] = useState('all')
   const [selectedWeek, setSelectedWeek] = useState('all')
+  const [favorites, setFavorites] = useState([])
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [password, setPassword] = useState(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [showAgentRunner, setShowAgentRunner] = useState(false)
-  const [showAnalytics, setShowAnalytics] = useState(false)
-  const [showMCPStatus, setShowMCPStatus] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [showUpload, setShowUpload] = useState(false)
 
   useEffect(() => {
-    // Check if password is stored in sessionStorage
     const storedPassword = sessionStorage.getItem('appPassword')
     if (storedPassword) {
       setPassword(storedPassword)
@@ -45,44 +44,9 @@ function App() {
     if (isAuthenticated && password) {
       fetchReports()
       fetchAgents()
+      fetchFavorites()
     }
   }, [isAuthenticated, password])
-
-  // Handle URL-based direct report access
-  useEffect(() => {
-    if (isAuthenticated && password && reports.length > 0) {
-      const path = window.location.pathname
-      // Check if path contains a .md filename
-      if (path !== '/' && path.endsWith('.md')) {
-        const filename = path.substring(1) // Remove leading slash
-        const report = reports.find(r => r.filename === filename)
-        if (report) {
-          setSelectedReport(report)
-          // Update URL without reloading
-          window.history.replaceState({}, '', `/${filename}`)
-        }
-      }
-    }
-  }, [isAuthenticated, password, reports])
-
-  // Handle browser back/forward navigation
-  useEffect(() => {
-    const handlePopState = () => {
-      const path = window.location.pathname
-      if (path === '/') {
-        setSelectedReport(null)
-      } else if (path.endsWith('.md') && reports.length > 0) {
-        const filename = path.substring(1)
-        const report = reports.find(r => r.filename === filename)
-        if (report) {
-          setSelectedReport(report)
-        }
-      }
-    }
-
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [reports])
 
   const handleLogin = (pass) => {
     setPassword(pass)
@@ -96,7 +60,7 @@ function App() {
     sessionStorage.removeItem('appPassword')
     setReports([])
     setAgents([])
-    setSelectedReport(null)
+    navigate('/')
   }
 
   const fetchReports = async () => {
@@ -122,6 +86,36 @@ function App() {
     }
   }
 
+  const fetchFavorites = async () => {
+    try {
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/favorites`, { headers })
+      if (response.ok) {
+        const data = await response.json()
+        setFavorites(data)
+      }
+    } catch (err) {
+      console.error('Error fetching favorites:', err)
+    }
+  }
+
+  const toggleFavorite = async (reportId) => {
+    const isFav = favorites.includes(reportId)
+    const headers = { 'Content-Type': 'application/json', ...(password ? { 'x-app-password': password } : {}) }
+    try {
+      const response = await fetch(`${API_URL}/api/favorites/${encodeURIComponent(reportId)}`, {
+        method: isFav ? 'DELETE' : 'POST',
+        headers,
+      })
+      if (response.ok) {
+        const updated = await response.json()
+        setFavorites(updated)
+      }
+    } catch (err) {
+      console.error('Error toggling favorite:', err)
+    }
+  }
+
   const fetchAgents = async () => {
     try {
       const headers = password ? { 'x-app-password': password } : {}
@@ -140,7 +134,6 @@ function App() {
     }
   }
 
-  // Helper function to get ISO week number
   const getWeekNumber = (date) => {
     const d = new Date(date)
     d.setHours(0, 0, 0, 0)
@@ -150,64 +143,36 @@ function App() {
     return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`
   }
 
-  // Helper function to format week for display
   const formatWeekDisplay = (weekStr) => {
     const [year, week] = weekStr.split('-W')
     return `Week ${week}, ${year}`
   }
 
-  // Get unique weeks from reports
   const reportWeeks = [...new Set(reports.map(report => getWeekNumber(report.timestamp)))]
 
-  // Add predefined calendar weeks (weeks 1-6 of 2026)
   const predefinedWeeks = [
-    '2026-W01',
-    '2026-W02',
-    '2026-W03',
-    '2026-W04',
-    '2026-W05',
-    '2026-W06',
-    '2026-W07',
-    '2026-W08',  
-    '2026-W09',
-    '2026-W10',
-    '2026-W11',
+    '2026-W01', '2026-W02', '2026-W03', '2026-W04', '2026-W05',
+    '2026-W06', '2026-W07', '2026-W08', '2026-W09', '2026-W10', '2026-W11',
   ]
 
-  // Combine and deduplicate weeks, then sort
-  const weeks = [...new Set([...predefinedWeeks, ...reportWeeks])]
-    .sort()
-    .reverse()
+  const weeks = [...new Set([...predefinedWeeks, ...reportWeeks])].sort().reverse()
 
-  // Get favorites from localStorage
-  const getFavorites = () => {
-    const saved = localStorage.getItem('reportFavorites')
-    return saved ? JSON.parse(saved) : []
-  }
-
-  // Filter reports by agent, week, and favorites
   const filteredReports = reports.filter(report => {
     const matchesAgent = selectedAgent === 'all' || report.agentName === selectedAgent
     const matchesWeek = selectedWeek === 'all' || getWeekNumber(report.timestamp) === selectedWeek
-    const matchesFavorites = !showFavoritesOnly || getFavorites().includes(report.id)
+    const matchesFavorites = !showFavoritesOnly || favorites.includes(report.id)
     return matchesAgent && matchesWeek && matchesFavorites
   })
 
-  // Calculate total cost for filtered reports
-  const totalCost = filteredReports.reduce((sum, report) => {
-    return sum + (report.cost || 0)
-  }, 0)
+  const totalCost = filteredReports.reduce((sum, report) => sum + (report.cost || 0), 0)
 
-  const handleReportSelect = (report) => {
-    setSelectedReport(report)
-    // Update URL to include report filename
-    window.history.pushState({}, '', `/${report.filename}`)
-  }
-
-  const handleBack = () => {
-    setSelectedReport(null)
-    // Update URL back to root
-    window.history.pushState({}, '', '/')
+  const navLinkClass = (path) => {
+    const active = location.pathname === path
+    return `flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 backdrop-blur-sm border text-sm font-medium ${
+      active
+        ? 'bg-white/30 text-white border-white/50'
+        : 'bg-white/10 hover:bg-white/20 text-white border-white/20 hover:border-white/30'
+    }`
   }
 
   if (!isAuthenticated) {
@@ -242,62 +207,59 @@ function App() {
       <header className="bg-gradient-to-r from-[#00203F] via-teal-700 to-teal-600 shadow-lg border-b border-[#00203F]/20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
-            
+
             <div className="flex items-center gap-4">
-              <a href="/"><img 
-                src={mariLogo} 
-                alt="Mari" 
+              <a href="/"><img
+                src={mariLogo}
+                alt="Mari"
                 className="w-12 h-12 rounded-lg shadow-lg"
-              />
-             </a>
+              /></a>
               <div>
                 <h1 className="text-xl font-bold text-white drop-shadow-lg">Mari, the CoS</h1>
                 <p className="text-xs text-[#ADEFD1] mt-0.5">Agent Reports & Analytics</p>
               </div>
-            
             </div>
+
             <div className="flex items-center gap-4">
               <button
                 onClick={() => setShowAgentRunner(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+                className={navLinkClass(null)}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
-                <span className="font-medium text-sm">Run Agents</span>
+                Run Agents
               </button>
 
               <button
-                onClick={() => setShowUpload(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+                onClick={() => navigate('/upload')}
+                className={navLinkClass('/upload')}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                 </svg>
-                <span className="font-medium text-sm">Upload</span>
+                Upload
               </button>
 
               <button
-                onClick={() => {
-                  console.log('Analytics button clicked')
-                  setShowAnalytics(true)
-                }}
-                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+                onClick={() => navigate('/analytics')}
+                className={navLinkClass('/analytics')}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
-                <span className="font-medium text-sm">Analytics</span>
+                Analytics
               </button>
+
               <button
-                onClick={() => setShowSettings(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
+                onClick={() => navigate('/settings')}
+                className={navLinkClass('/settings')}
                 title="LLM Settings"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                 </svg>
-                <span className="font-medium text-sm">Settings</span>
+                Settings
               </button>
 
               <button
@@ -315,54 +277,51 @@ function App() {
         </div>
       </header>
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        {showUpload ? (
-          <Upload
-            password={password}
-            onBack={() => setShowUpload(false)}
-          />
-        ) : showSettings ? (
-          <Settings
-            password={password}
-            onBack={() => setShowSettings(false)}
-          />
-        ) : showMCPStatus ? (
-          <MCPStatus
-            password={password}
-            onBack={() => setShowMCPStatus(false)}
-          />
-        ) : showAnalytics ? (
-          <Analytics
-            password={password}
-            onBack={() => setShowAnalytics(false)}
-          />
-        ) : selectedReport ? (
-          <ReportViewer
-            report={selectedReport}
-            onBack={handleBack}
-            password={password}
-          />
-        ) : (
-          <>
-            <FilterBar
-              agents={agents}
-              selectedAgent={selectedAgent}
-              onAgentChange={setSelectedAgent}
-              weeks={weeks}
-              selectedWeek={selectedWeek}
-              onWeekChange={setSelectedWeek}
-              formatWeekDisplay={formatWeekDisplay}
-              reportCount={filteredReports.length}
-              totalCost={totalCost}
-              showFavoritesOnly={showFavoritesOnly}
-              onFavoritesToggle={() => setShowFavoritesOnly(!showFavoritesOnly)}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <Routes>
+          <Route path="/upload" element={
+            <Upload password={password} onBack={() => navigate('/')} />
+          } />
+          <Route path="/settings" element={
+            <Settings password={password} onBack={() => navigate('/')} />
+          } />
+          <Route path="/mcp-status" element={
+            <MCPStatus password={password} onBack={() => navigate('/')} />
+          } />
+          <Route path="/analytics" element={
+            <Analytics password={password} onBack={() => navigate('/')} />
+          } />
+          <Route path="/:filename" element={
+            <ReportViewerRoute
+              reports={reports}
+              password={password}
+              onDeleteSuccess={() => { navigate('/'); fetchReports() }}
             />
-            <ReportList
-              reports={filteredReports}
-              onReportSelect={handleReportSelect}
-            />
-          </>
-        )}
+          } />
+          <Route path="/" element={
+            <>
+              <FilterBar
+                agents={agents}
+                selectedAgent={selectedAgent}
+                onAgentChange={setSelectedAgent}
+                weeks={weeks}
+                selectedWeek={selectedWeek}
+                onWeekChange={setSelectedWeek}
+                formatWeekDisplay={formatWeekDisplay}
+                reportCount={filteredReports.length}
+                totalCost={totalCost}
+                showFavoritesOnly={showFavoritesOnly}
+                onFavoritesToggle={() => setShowFavoritesOnly(!showFavoritesOnly)}
+              />
+              <ReportList
+                reports={filteredReports}
+                onReportSelect={(report) => navigate(`/${report.filename}`)}
+                favorites={favorites}
+                onToggleFavorite={toggleFavorite}
+              />
+            </>
+          } />
+        </Routes>
       </div>
 
       {showAgentRunner && (
@@ -417,7 +376,7 @@ function App() {
               <h3 className="text-white font-semibold text-lg mb-3">System Status</h3>
               <div className="flex flex-col gap-2 items-center md:items-end">
                 <button
-                  onClick={() => setShowMCPStatus(true)}
+                  onClick={() => navigate('/mcp-status')}
                   className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-200 backdrop-blur-sm border border-white/20 hover:border-white/30"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -443,5 +402,44 @@ function App() {
   )
 }
 
-export default App
+// Separate component so it can use useParams inside a Route
+function ReportViewerRoute({ reports, password, onDeleteSuccess }) {
+  const { filename } = useParams()
+  const navigate = useNavigate()
 
+  // .md files only; anything else falls through (e.g. /analytics won't match)
+  if (!filename.endsWith('.md')) {
+    return <div className="text-center py-16 text-gray-500">Page not found.</div>
+  }
+
+  const report = reports.find(r => r.filename === filename)
+  if (!report) {
+    return (
+      <div className="text-center py-16 text-gray-500">
+        <p className="text-lg font-medium">Report not found</p>
+        <button onClick={() => navigate('/')} className="mt-4 text-teal-600 hover:underline">
+          Back to reports
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <ReportViewer
+      report={report}
+      onBack={() => navigate('/')}
+      onDeleteSuccess={onDeleteSuccess}
+      password={password}
+    />
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
+    </BrowserRouter>
+  )
+}
+
+export default App

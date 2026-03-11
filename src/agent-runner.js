@@ -68,7 +68,7 @@ export class AgentRunner {
     } else if (this.useGemini) {
       console.log('💎 Using Google Gemini API (direct fetch)');
       this.geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY;
-      this.model = process.env.GEMINI_MODEL || persisted?.geminiModel || 'gemini-2.0-flash-lite';
+      this.model = process.env.GEMINI_MODEL || persisted?.geminiModel || 'gemini-2.5-flash';
       console.log(`  Model: ${this.model}`);
     } else {
       console.log('🔑 Using Anthropic Claude API');
@@ -1294,6 +1294,7 @@ HR News RSS: ${(this.config.thoughtleadership?.hrNewsRSS || []).join(', ') || 'N
 AI Critics: ${(this.config.thoughtleadership?.AICritics || []).join(', ') || 'None'}
 Web Sources: ${(this.config.thoughtleadership?.webSources || []).join(', ') || 'None'}
 Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || []).join(', ') || 'None'}
+Reddit Sources (top ${this.config.thoughtleadership?.redditSources?.topPosts || 3} posts each): ${(this.config.thoughtleadership?.redditSources?.subreddits || []).map(s => `${s.name} (${s.reason})`).join(', ') || 'None'}
 **CRITICAL: ONLY use RSS feeds listed above. DO NOT search for or use any RSS feeds not explicitly listed here.**
 
 ## Releases
