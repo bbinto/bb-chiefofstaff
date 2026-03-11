@@ -8,6 +8,7 @@ package-lock.json
 # Configuration (contains sensitive data)
 config.json
 private-google-cal.json
+frontend/vite.config.js
 
 # TODOs for myself
 TODO-PRIVATE.md
