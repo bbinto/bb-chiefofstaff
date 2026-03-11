@@ -1,26 +1,7 @@
-import { useState, useEffect } from 'react'
-
-function ReportList({ reports, onReportSelect }) {
-  const [favorites, setFavorites] = useState(() => {
-    // Load favorites from localStorage on init
-    const saved = localStorage.getItem('reportFavorites')
-    return saved ? JSON.parse(saved) : []
-  })
-
-  // Save favorites to localStorage whenever they change
-  useEffect(() => {
-    localStorage.setItem('reportFavorites', JSON.stringify(favorites))
-  }, [favorites])
-
+function ReportList({ reports, onReportSelect, favorites = [], onToggleFavorite }) {
   const toggleFavorite = (e, reportId) => {
-    e.stopPropagation() // Prevent report selection when clicking star
-    setFavorites(prev => {
-      if (prev.includes(reportId)) {
-        return prev.filter(id => id !== reportId)
-      } else {
-        return [...prev, reportId]
-      }
-    })
+    e.stopPropagation()
+    onToggleFavorite(reportId)
   }
 
   const isFavorite = (reportId) => favorites.includes(reportId)

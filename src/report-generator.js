@@ -181,44 +181,40 @@ export class ReportGenerator {
     if (result.manualSourcesFolder) {
       metadata += `**Manual Sources Folder**: ${result.manualSourcesFolder}\n`;
     }
+    const isLocal = result.llmBackend === 'Ollama';
     if (result.usage) {
       const inputTokens = result.usage.input_tokens || 0;
       const outputTokens = result.usage.output_tokens || 0;
-      const inputCost = (inputTokens / 1000000) * PRICING.INPUT_TOKENS_PER_MILLION;
-      const outputCost = (outputTokens / 1000000) * PRICING.OUTPUT_TOKENS_PER_MILLION;
-      const totalCost = inputCost + outputCost;
 
       metadata += `**Token Usage**: ${inputTokens.toLocaleString()} input, ${outputTokens.toLocaleString()} output\n`;
-      metadata += `**Cost**: $${totalCost.toFixed(4)} ($${inputCost.toFixed(4)} input + $${outputCost.toFixed(4)} output)\n`;
-      
-      // Calculate and add environmental impact
-      const carbonFootprint = this.calculateCarbonFootprint(inputTokens, outputTokens);
-      metadata += `**Environmental Impact**: ${this.formatEnvironmentalImpact(carbonFootprint.totalCO2Kg)}`;
-      
-      // Add context for better understanding (for > 1g CO2e)
-      if (carbonFootprint.totalCO2Kg > 0.001) {
-        const treeDays = (carbonFootprint.totalCO2Kg * ENVIRONMENTAL_IMPACT.TREE_DAYS_PER_KG_CO2).toFixed(1);
-        metadata += ` (equivalent to ~${treeDays} days of a tree's CO₂ absorption)`;
+
+      if (isLocal) {
+        metadata += `**Cost**: $0.00 (local model)\n`;
+        metadata += `**Environmental Impact**: 🟢 Local compute (no cloud inference)\n`;
+      } else {
+        const inputCost = (inputTokens / 1000000) * PRICING.INPUT_TOKENS_PER_MILLION;
+        const outputCost = (outputTokens / 1000000) * PRICING.OUTPUT_TOKENS_PER_MILLION;
+        const totalCost = inputCost + outputCost;
+        metadata += `**Cost**: $${totalCost.toFixed(4)} ($${inputCost.toFixed(4)} input + $${outputCost.toFixed(4)} output)\n`;
+
+        const carbonFootprint = this.calculateCarbonFootprint(inputTokens, outputTokens);
+        metadata += `**Environmental Impact**: ${this.formatEnvironmentalImpact(carbonFootprint.totalCO2Kg)}`;
+        if (carbonFootprint.totalCO2Kg > 0.001) {
+          const treeDays = (carbonFootprint.totalCO2Kg * ENVIRONMENTAL_IMPACT.TREE_DAYS_PER_KG_CO2).toFixed(1);
+          metadata += ` (equivalent to ~${treeDays} days of a tree's CO₂ absorption)`;
+        }
+        metadata += `\n`;
       }
-      metadata += `\n`;
     }
     if (result.executionTimeMin) {
       metadata += `**Execution Time**: ${result.executionTimeMin} min\n`;
     }
     if (result.llmBackend) {
-      metadata += `**LLM**: ${result.llmBackend} (${result.llmModel})\n`;
+      const llmLabel = isLocal ? `Local Ollama` : result.llmBackend;
+      metadata += `**LLM**: ${llmLabel} (${result.llmModel})\n`;
     }
     
     const metadataSection = metadata ? `${metadata}\n` : '';
-
- /*   return `## ${title}
-    
-
-${metadataSection}${result.output}
-
----
-
-`;*/
 
   return `
 

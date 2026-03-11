@@ -362,7 +362,7 @@ const createMarkdownComponents = (sectionIndex, h3Index, context = '') => ({
   }
 })
 
-function ReportViewer({ report, onBack, password }) {
+function ReportViewer({ report, onBack, onDeleteSuccess, password }) {
   const [content, setContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -933,8 +933,11 @@ function ReportViewer({ report, onBack, password }) {
         }
       }
 
-      alert('Report deleted successfully!')
-      onBack() // Navigate back to report list
+      if (onDeleteSuccess) {
+        onDeleteSuccess()
+      } else {
+        onBack()
+      }
     } catch (err) {
       console.error('Failed to delete report:', err)
       alert(`Failed to delete report: ${err.message}`)

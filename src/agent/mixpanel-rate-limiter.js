@@ -8,6 +8,7 @@
  */
 
 import { MIXPANEL_RATE_LIMITS } from '../utils/constants.js';
+import { sleep } from '../utils/helpers.js';
 
 /**
  * Mixpanel Rate Limiter Class
@@ -30,13 +31,6 @@ export class MixpanelRateLimiter {
 
   /**
    * Sleep utility
-   * @param {number} ms - Milliseconds to sleep
-   * @returns {Promise<void>}
-   */
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
   /**
    * Clean up old queries outside the time windows
    */
@@ -130,7 +124,7 @@ export class MixpanelRateLimiter {
         );
       }
 
-      await this.sleep(Math.min(waitTime, 1000)); // Cap wait at 1 second per iteration
+      await sleep(Math.min(waitTime, 1000)); // Cap wait at 1 second per iteration
     }
   }
 
@@ -206,7 +200,7 @@ export class MixpanelRateLimiter {
     // Also clear old queries to make room
     this.cleanupQueryWindows();
 
-    await this.sleep(backoffTime);
+    await sleep(backoffTime);
   }
 
   /**
@@ -267,8 +261,6 @@ export class MixpanelRateLimiter {
         // Remove this query from tracking since it failed due to rate limiting
         // We don't want to count failed queries against our limits
         this.removeQuery(queryTracker.timestamp);
-        queryRemoved = true;
-        
         throw error; // Re-throw to let caller handle retry logic
       }
       

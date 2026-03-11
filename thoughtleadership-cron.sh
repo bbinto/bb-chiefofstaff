@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Daily Brief Cron Script
+# Thought Leadership Cron Script
 # This script:
-# 1. Generates a daily brief report
+# 1. Generates a thought leadership report
 # 2. Creates a light version
-# 3. Generates a podcast from the light version
+# 3. Generates a podcast from the light version and uploads it
 
 set -eu
 
@@ -13,7 +13,7 @@ PROJECT_DIR="/home/pi/Documents/GitHub/bb-chiefofstaff"
 cd "$PROJECT_DIR"
 
 # Log file for cron output
-LOG_FILE="$PROJECT_DIR/logs/daily-brief-cron.log"
+LOG_FILE="$PROJECT_DIR/logs/thoughtleadership-cron.log"
 mkdir -p "$PROJECT_DIR/logs"
 
 # Function to log with timestamp
@@ -22,7 +22,7 @@ log() {
 }
 
 log "==================================================================="
-log "Starting Daily Brief Workflow"
+log "Starting Thought Leadership Workflow"
 log "==================================================================="
 
 # Log which LLM is selected (env vars take precedence over llm-settings.json)
@@ -43,9 +43,9 @@ try {
   log "LLM Selected: $LLM_INFO"
 fi
 
-# Step 1: Generate the daily brief report
-log "Step 1: Generating daily brief report..."
-OUTPUT=$(npm start daily-brief 2>&1 | tee -a "$LOG_FILE")
+# Step 1: Generate the thought leadership report
+log "Step 1: Generating thought leadership report..."
+OUTPUT=$(npm start thoughtleadership-updates 2>&1 | tee -a "$LOG_FILE")
 
 # Extract the filename from the output
 # Looking for pattern: "Full report saved to: /path/to/reports/filename.md"
@@ -72,16 +72,16 @@ else
   exit 1
 fi
 
-# Step 3: Generate podcast from light version
-log "Step 3: Generating podcast from light version..."
+# Step 3: Generate podcast from light version and upload
+log "Step 3: Generating podcast from light version and uploading..."
 if sh podcast.sh "${FILENAME}-light" 2>&1 | tee -a "$LOG_FILE"; then
-  log "Podcast created successfully: ${FILENAME}-light.mp3"
+  log "Podcast created and uploaded successfully: ${FILENAME}-light.mp3"
 else
-  log "ERROR: Failed to create podcast"
+  log "ERROR: Failed to create or upload podcast"
   exit 1
 fi
 
 log "==================================================================="
-log "Daily Brief Workflow Completed Successfully"
+log "Thought Leadership Workflow Completed Successfully"
 log "==================================================================="
 log ""
