@@ -101,6 +101,9 @@ function AppContent() {
 
   const toggleFavorite = async (reportId) => {
     const isFav = favorites.includes(reportId)
+    // Optimistic update — respond immediately, rollback on failure
+    const optimistic = isFav ? favorites.filter(id => id !== reportId) : [...favorites, reportId]
+    setFavorites(optimistic)
     const headers = { 'Content-Type': 'application/json', ...(password ? { 'x-app-password': password } : {}) }
     try {
       const response = await fetch(`${API_URL}/api/favorites/${encodeURIComponent(reportId)}`, {
@@ -110,9 +113,12 @@ function AppContent() {
       if (response.ok) {
         const updated = await response.json()
         setFavorites(updated)
+      } else {
+        setFavorites(favorites) // rollback
       }
     } catch (err) {
       console.error('Error toggling favorite:', err)
+      setFavorites(favorites) // rollback
     }
   }
 

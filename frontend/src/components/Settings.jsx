@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
+import LLMEvaluator from './LLMEvaluator'
+import { CLAUDE_MODELS, GEMINI_MODELS, OLLAMA_CLOUD_MODELS, OLLAMA_LOCAL_MODELS } from '../llmModels'
 
 // Get API URL from environment variable, fallback to relative URL
 const API_URL = import.meta.env.VITE_API_URL || ''
@@ -27,18 +29,8 @@ function Settings({ password, onBack }) {
   const [error, setError] = useState(null)
   const [validationError, setValidationError] = useState(null)
 
-  const localOllamaModels = [
-
-  ]
-
-  const cloudOllamaModels = [
-    { value: 'gpt-oss:120b-cloud', label: 'GPT-OSS 120B (Cloud, High quality)' },
-    { value: 'qwen3-vl:235b-cloud', label: 'Qwen3 VL 235B (Cloud, Vision + Language)' },
-    { value: 'deepseek-v3.1:671b-cloud', label: 'DeepSeek V3.1 671B (Cloud, High quality)' },
-    { value: 'nemotron-3-nano:30b-cloud', label: 'Nemotron 3 Nano 30B (Cloud, Low latency)' },
-    { value: 'glm-5:cloud', label: 'GLM-5 (Cloud, General purpose)' },
-
-  ]
+  const localOllamaModels = OLLAMA_LOCAL_MODELS
+  const cloudOllamaModels = OLLAMA_CLOUD_MODELS.map(m => ({ value: m.value, label: `${m.label} (${m.tag})` }))
 
   useEffect(() => {
     if (activeTab === 'llm') {
@@ -46,6 +38,7 @@ function Settings({ password, onBack }) {
     } else if (activeTab === 'config') {
       fetchConfig()
     }
+    // 'evaluator' tab loads its own data internally
   }, [activeTab])
 
   const fetchSettings = async () => {
@@ -253,6 +246,16 @@ function Settings({ password, onBack }) {
           🔑 LLM Settings
         </button>
         <button
+          onClick={() => setActiveTab('evaluator')}
+          className={`px-6 py-3 font-semibold transition-colors ${
+            activeTab === 'evaluator'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          🧪 LLM Evaluator
+        </button>
+        <button
           onClick={() => setActiveTab('config')}
           className={`px-6 py-3 font-semibold transition-colors ${
             activeTab === 'config'
@@ -260,11 +263,11 @@ function Settings({ password, onBack }) {
               : 'text-gray-600 hover:text-gray-900'
           }`}
         >
-          ⚙️ Configuration
+          ⚙️ App Configuration
         </button>
       </div>
 
-      {loading ? (
+      {loading && activeTab !== 'evaluator' ? (
         <div className="text-center py-12">
           <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
           <p className="mt-4 text-gray-600">Loading settings...</p>
@@ -359,13 +362,9 @@ function Settings({ password, onBack }) {
                   onChange={(e) => setClaudeModel(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="claude-opus-4-6">Claude Opus 4.6 (Arena #1 Text Today)</option>
-                  <option value="claude-opus-4-6-thinking">Claude Opus 4.6 Thinking (Arena #1 Thinking Today)</option>
-                  <option value="claude-opus-4-1-20250805">Claude Opus 4.1 (Latest, Most capable)</option>
-                  <option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5 (Recommended)</option>
-                  <option value="claude-3-5-haiku-20241022">Claude Haiku 3.5 (Fast, Budget-friendly)</option>
-                  <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast, Budget-friendly)</option>
-                  <option value="claude-3-haiku-20240307">Claude 3 Haiku (Cheapest, ~$0.25/M input)</option>
+                  {CLAUDE_MODELS.map(m => (
+                    <option key={m.value} value={m.value}>{m.label} ({m.tag})</option>
+                  ))}
                 </select>
                 <p className="text-xs text-gray-600 mt-1">
                   ℹ️ Claude Sonnet 4.5 offers the best balance of speed and quality for agents.
@@ -425,10 +424,9 @@ function Settings({ password, onBack }) {
                   onChange={(e) => setGeminiModel(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Best quality flash)</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Highest quality)</option>
-                  <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Cheapest, best rate limits)</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Legacy, fast)</option>
+                  {GEMINI_MODELS.map(m => (
+                    <option key={m.value} value={m.value}>{m.label} ({m.tag})</option>
+                  ))}
                 </select>
                 <p className="text-xs text-gray-600 mt-1">
                   💡 <strong>Flash 2.5</strong> offers the best balance of quality and speed.
@@ -501,6 +499,11 @@ function Settings({ password, onBack }) {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
             <strong>ℹ️ How it works:</strong> When you save these settings, all new agent runs will use the selected LLM. Claude is always the default. For Ollama setup instructions, see <strong>OLLAMA_SETUP.md</strong>. For Gemini, add <code className="bg-blue-200 px-1 rounded">GOOGLE_GEMINI_API_KEY</code> to your <code className="bg-blue-200 px-1 rounded">.env</code> file.
           </div>
+        </div>
+      ) : activeTab === 'evaluator' ? (
+        // LLM Evaluator Tab
+        <div className="max-w-6xl">
+          <LLMEvaluator password={password} />
         </div>
       ) : (
         // Config Tab Content

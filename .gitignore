@@ -72,3 +72,4 @@ OLLAMA_SETUP.md
 llm-settings.json
 frontend/vite.config.js
 frontend/vite.config.js
+favorites.json

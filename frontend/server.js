@@ -81,8 +81,6 @@ function savePersistedLLMSettings(settings) {
   }
 }
 
-const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || null;
-
 const _persisted = loadPersistedLLMSettings();
 let llmSettings = {
   useOllama: _persisted?.useOllama ?? (process.env.USE_OLLAMA === 'true'),
@@ -1857,6 +1855,109 @@ app.get('/api/upload-weeks', (req, res) => {
 });
 
 // ─── End Manual Sources Upload ────────────────────────────────────────────────
+
+// ─── LLM Evaluator ────────────────────────────────────────────────────────────
+
+// Return MCP servers from claude_desktop_config.json
+app.get('/api/llm-eval/mcp-servers', async (req, res) => {
+  try {
+    const { MCPClientManager } = await import('../src/mcp-client.js');
+    const mcpClient = new MCPClientManager();
+    const mcpServers = mcpClient.loadMCPConfig();
+    res.json(mcpServers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Run a prompt against a specific LLM and return the response + latency
+app.post('/api/llm-eval/run', async (req, res) => {
+  const { backend, model, prompt, systemPrompt } = req.body;
+  if (!backend || !model || !prompt) {
+    return res.status(400).json({ error: 'backend, model, and prompt are required' });
+  }
+
+  const start = Date.now();
+
+  try {
+    let response = '';
+
+    if (backend === 'claude') {
+      const apiKey = ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
+
+      const body = {
+        model,
+        max_tokens: 2048,
+        messages: [{ role: 'user', content: prompt }]
+      };
+      if (systemPrompt) body.system = systemPrompt;
+
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'x-api-key': apiKey
+        },
+        body: JSON.stringify(body)
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error?.message || `Claude API error ${r.status}`);
+      response = extractAnthropicText(data);
+
+    } else if (backend === 'gemini') {
+      const apiKey = GOOGLE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error('GOOGLE_GEMINI_API_KEY is not configured');
+
+      const messages = [];
+      if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: 'user', content: prompt });
+
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ model, messages })
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error?.message || `Gemini API error ${r.status}`);
+      response = data?.choices?.[0]?.message?.content || '';
+
+    } else if (backend === 'ollama') {
+      const endpoint = buildOllamaChatUrl(llmSettings.ollamaBaseUrl);
+      const headers = { 'Content-Type': 'application/json' };
+      if (llmSettings.ollamaApiKey) headers['Authorization'] = `Bearer ${llmSettings.ollamaApiKey}`;
+
+      const messages = [];
+      if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: 'user', content: prompt });
+
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model, messages, max_tokens: 2048 })
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error?.message || data?.error || `Ollama error ${r.status}`);
+      response = extractOllamaText(data);
+
+    } else {
+      throw new Error(`Unknown backend: ${backend}`);
+    }
+
+    res.json({ response, latencyMs: Date.now() - start, model, backend });
+  } catch (err) {
+    res.json({ error: err.message, latencyMs: Date.now() - start, model, backend });
+  }
+});
+
+// ─── End LLM Evaluator ────────────────────────────────────────────────────────
 
 // Handle client-side routing - serve index.html for .md URLs
 app.get('/*.md', (req, res) => {

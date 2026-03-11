@@ -1295,6 +1295,7 @@ AI Critics: ${(this.config.thoughtleadership?.AICritics || []).join(', ') || 'No
 Web Sources: ${(this.config.thoughtleadership?.webSources || []).join(', ') || 'None'}
 Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || []).join(', ') || 'None'}
 Reddit Sources (top ${this.config.thoughtleadership?.redditSources?.topPosts || 3} posts each): ${(this.config.thoughtleadership?.redditSources?.subreddits || []).map(s => `${s.name} (${s.reason})`).join(', ') || 'None'}
+NYTimes Tech & AI: Use the nytimes MCP to fetch the top ${this.config.thoughtleadership?.nyTimes?.topArticlesCount || 3} articles from the "${(this.config.thoughtleadership?.nyTimes?.sections || ['technology']).join('", "')}" section(s). Filter for articles related to: ${(this.config.thoughtleadership?.nyTimes?.filterTopics || []).join(', ')}.
 **CRITICAL: ONLY use RSS feeds listed above. DO NOT search for or use any RSS feeds not explicitly listed here.**
 
 ## Releases
