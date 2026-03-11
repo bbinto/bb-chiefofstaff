@@ -22,6 +22,7 @@ function AgentRunner({ password, onClose }) {
     { name: 'quarterly-review', category: 'Business', displayName: 'Quarterly Review', description: 'Quarterly review of product releases and OKR updates', lastRun: null },
     { name: 'quarterly-performance-review', category: 'Team', displayName: 'Quarterly Performance Review', description: 'Quarterly performance review for Director of Product', lastRun: null },
     { name: 'performance-review-q3', category: 'Team', displayName: 'Q3 Performance Review (WL)', description: 'Generate Q3 performance review using Workleap questionnaire format', requiresParam: 'email', lastRun: null },
+    { name: 'performance-review-q4', category: 'Team', displayName: 'Q4 Performance Review (WL)', description: 'Generate Q4 performance review: strengths, improvement areas, and overall rating based on impact and contributions', requiresParam: 'email', paramType: 'teamMemberEmail', lastRun: null },
     { name: 'thoughtleadership-updates', category: 'Prep', displayName: 'Thought Leadership', description: 'Product thought leadership and new topics', lastRun: null },
     { name: 'strategy-roadmap', category: 'Business', displayName: 'Strategy Roadmap', description: 'Strategy roadmap', lastRun: null },
     { name: 'slack-user-analysis', category: 'Team', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', paramType: 'slackUserTeam', lastRun: null },
@@ -30,7 +31,9 @@ function AgentRunner({ password, onClose }) {
     { name: 'weekly-executive-summary', category: 'Prep',  displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
     { name: 'good-vibes-recognition', category: 'Team', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null },
     { name: 'icp-inspector', category: 'Business', displayName: 'ICP Inspector', description: 'Cross-check CRM companies (20–250 seats) with Gong calls and VoC; split by closed won/lost', lastRun: null },
-    
+    { name: 'feature-insights', category: 'Business', displayName: 'FY27 Feature Insights', description: 'Mine Slack, VoC, and Jira for OV/Officevibe feature requests and produce a prioritized FY27 ideas list', lastRun: null },
+    { name: 'bi-weekly-team', category: 'Team', displayName: 'Bi-Weekly Team Meeting', description: 'Prepare a short agenda doc for the OV bi-weekly sync: attendance, business health, eng highlights, and discussion topics', requiresParam: 'manualSourcesFolder', lastRun: null },
+
   ])
 
   const [selectedAgents, setSelectedAgents] = useState([])
@@ -499,6 +502,7 @@ function AgentRunner({ password, onClose }) {
                       {agent.requiresParam === 'manualSourcesFolder' && 'Manual Sources Folder'}
                       {agent.requiresParam === 'folder' && 'Folder'}
                       {agent.requiresParam === 'email' && !agent.paramType && 'Email'}
+                      {agent.paramType === 'teamMemberEmail' && 'Select Team Member'}
                       {agent.requiresParam === 'week' && 'Week'}
                       {agent.requiresParam === 'feature' && 'Feature (release)'}
                       <span className="text-orange-600 ml-1">*</span>
@@ -545,6 +549,20 @@ function AgentRunner({ password, onClose }) {
                         {oneOnOnes.map(person => (
                           <option key={person.email} value={person.email}>
                             {person.name} ({person.role})
+                          </option>
+                        ))}
+                      </select>
+                    ) : agent.paramType === 'teamMemberEmail' ? (
+                      <select
+                        value={parameters.email}
+                        onChange={(e) => handleParameterChange('email', e.target.value)}
+                        disabled={isRunning}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white"
+                      >
+                        <option value="">Select a team member...</option>
+                        {teamMembers.map(member => (
+                          <option key={member.email} value={member.email}>
+                            {member.name} ({member.role})
                           </option>
                         ))}
                       </select>

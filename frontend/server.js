@@ -3,6 +3,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
 import { extractOneLineSummary, extractInsights } from '../src/utils/summary-extractor.js';
 import { FRONTEND, PATHS } from '../src/utils/constants.js';
 
@@ -58,19 +59,43 @@ const APP_PASSWORD = process.env.APP_PASSWORD || null;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || null;
 const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || null;
 
-// LLM Settings - stored in memory (defaults from environment)
+// LLM Settings - persisted to disk and loaded on startup
+const LLM_SETTINGS_PATH = path.join(__dirname, '..', 'llm-settings.json');
+
+function loadPersistedLLMSettings() {
+  if (fs.existsSync(LLM_SETTINGS_PATH)) {
+    try {
+      return JSON.parse(fs.readFileSync(LLM_SETTINGS_PATH, 'utf-8'));
+    } catch {
+      console.warn('[LLM Settings] Failed to parse llm-settings.json, using env defaults');
+    }
+  }
+  return null;
+}
+
+function savePersistedLLMSettings(settings) {
+  try {
+    fs.writeFileSync(LLM_SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[LLM Settings] Failed to save llm-settings.json:', err.message);
+  }
+}
+
+const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || null;
+
+const _persisted = loadPersistedLLMSettings();
 let llmSettings = {
-  useOllama: process.env.USE_OLLAMA === 'true',
-  useGemini: process.env.USE_GEMINI === 'true',
-  ollamaModel: process.env.OLLAMA_MODEL || 'mistral',
-  ollamaBaseUrl: 'http://localhost:11434',
-  ollamaApiKey: process.env.OLLAMA_API_KEY || '',
-  claudeModel: process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite'
+  useOllama: _persisted?.useOllama ?? (process.env.USE_OLLAMA === 'true'),
+  useGemini: _persisted?.useGemini ?? (process.env.USE_GEMINI === 'true'),
+  ollamaModel: _persisted?.ollamaModel ?? (process.env.OLLAMA_MODEL || 'mistral'),
+  ollamaBaseUrl: _persisted?.ollamaBaseUrl ?? 'http://localhost:11434',
+  ollamaApiKey: _persisted?.ollamaApiKey ?? (process.env.OLLAMA_API_KEY || ''),
+  claudeModel: _persisted?.claudeModel ?? (process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929'),
+  geminiModel: _persisted?.geminiModel ?? (process.env.GEMINI_MODEL || 'gemini-2.5-flash'),
 };
 
 function buildLightReportPrompt(filename, reportContent) {
-  return [
+  const system = [
     'You are an executive communications assistant and podcast script writer.',
     'Create a LIGHT version of the provided report in markdown that sounds natural when read aloud by a text-to-speech engine.',
     'Focus only on the most important information for executives.',
@@ -92,13 +117,17 @@ function buildLightReportPrompt(filename, reportContent) {
     '  4) ## Risks / Watchouts (if applicable)',
     '- For "Actions to Take", use numbered items with clear owner-oriented wording.',
     '- Preserve concrete facts/dates/metrics from the original report when present.',
-    '- Return markdown only.',
-    '',
+    '- Return markdown only. Do not add any commentary, explanation, or text outside the markdown report.',
+  ].join('\n');
+
+  const user = [
     `Original filename: ${filename}`,
     '',
     'Original report markdown:',
     reportContent
   ].join('\n');
+
+  return { system, user };
 }
 
 function sanitizeLightReportForTTS(markdown) {
@@ -138,7 +167,7 @@ function buildOllamaChatUrl(baseUrl) {
   return trimmed.endsWith('/v1') ? `${trimmed}/chat/completions` : `${trimmed}/v1/chat/completions`;
 }
 
-async function generateLightReportWithClaude(promptText) {
+async function generateLightReportWithClaude({ system, user }) {
   if (!ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY is not set. Configure Claude API key or switch to Ollama in Settings.');
   }
@@ -154,7 +183,8 @@ async function generateLightReportWithClaude(promptText) {
       model: llmSettings.claudeModel || 'claude-sonnet-4-5-20250929',
       max_tokens: 3000,
       temperature: 0.2,
-      messages: [{ role: 'user', content: promptText }]
+      system,
+      messages: [{ role: 'user', content: user }]
     })
   });
 
@@ -179,7 +209,7 @@ async function generateLightReportWithClaude(promptText) {
   return markdown;
 }
 
-async function generateLightReportWithOllama(promptText) {
+async function generateLightReportWithOllama({ system, user }) {
   const endpoint = buildOllamaChatUrl(llmSettings.ollamaBaseUrl);
   const ollamaHeaders = { 'Content-Type': 'application/json' };
   if (llmSettings.ollamaApiKey) {
@@ -190,8 +220,12 @@ async function generateLightReportWithOllama(promptText) {
     headers: ollamaHeaders,
     body: JSON.stringify({
       model: llmSettings.ollamaModel || 'mistral',
+      max_tokens: 3000,
       temperature: 0.2,
-      messages: [{ role: 'user', content: promptText }]
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ]
     })
   });
 
@@ -216,12 +250,12 @@ async function generateLightReportWithOllama(promptText) {
   return markdown;
 }
 
-async function generateLightReportWithGemini(promptText) {
+async function generateLightReportWithGemini({ system, user }) {
   if (!GOOGLE_GEMINI_API_KEY) {
     throw new Error('GOOGLE_GEMINI_API_KEY is not set. Configure Gemini API key in your .env file.');
   }
 
-  const model = llmSettings.geminiModel || 'gemini-2.0-flash-lite';
+  const model = llmSettings.geminiModel || 'gemini-2.5-flash';
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`,
     {
@@ -233,7 +267,10 @@ async function generateLightReportWithGemini(promptText) {
       body: JSON.stringify({
         model,
         temperature: 0.2,
-        messages: [{ role: 'user', content: promptText }]
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ]
       })
     }
   );
@@ -260,22 +297,22 @@ async function generateLightReportWithGemini(promptText) {
 }
 
 async function generateLightReportMarkdown(filename, reportContent) {
-  const promptText = buildLightReportPrompt(filename, reportContent);
+  const prompt = buildLightReportPrompt(filename, reportContent);
   if (llmSettings.useOllama) {
-    return generateLightReportWithOllama(promptText);
+    return generateLightReportWithOllama(prompt);
   }
 
   if (llmSettings.useGemini) {
-    return generateLightReportWithGemini(promptText);
+    return generateLightReportWithGemini(prompt);
   }
 
   if (ANTHROPIC_API_KEY) {
-    return generateLightReportWithClaude(promptText);
+    return generateLightReportWithClaude(prompt);
   }
 
   try {
     console.warn('ANTHROPIC_API_KEY not set. Falling back to Ollama for light report generation.');
-    return await generateLightReportWithOllama(promptText);
+    return await generateLightReportWithOllama(prompt);
   } catch (ollamaError) {
     throw new Error(`ANTHROPIC_API_KEY is not set and Ollama fallback failed: ${ollamaError.message}`);
   }
@@ -333,6 +370,20 @@ if (process.env.VERCEL === '1') {
 const REPORTS_DIR = process.env.VERCEL === '1' 
   ? path.join(__dirname, 'reports')
   : path.join(__dirname, '..', PATHS.REPORTS_DIR);
+
+// Path to favorites.json
+const FAVORITES_PATH = path.join(__dirname, '..', 'favorites.json');
+
+function loadFavorites() {
+  if (fs.existsSync(FAVORITES_PATH)) {
+    try { return JSON.parse(fs.readFileSync(FAVORITES_PATH, 'utf-8')); } catch { return []; }
+  }
+  return [];
+}
+
+function saveFavorites(ids) {
+  fs.writeFileSync(FAVORITES_PATH, JSON.stringify(ids, null, 2), 'utf-8');
+}
 
 // Path to config.json - use frontend/config.json for Vercel, fallback to parent for local
 // On Vercel, config can come from APP_CONFIG_JSON environment variable (as JSON string)
@@ -870,6 +921,103 @@ app.get('/api/reports/:filename/podcast', (req, res) => {
   }
 });
 
+// Compare two reports using the current LLM
+app.post('/api/reports/compare', async (req, res) => {
+  const { report1, report2 } = req.body;
+  if (!report1 || !report2) {
+    return res.status(400).json({ error: 'report1 and report2 filenames are required' });
+  }
+
+  const path1 = path.join(REPORTS_DIR, path.basename(report1));
+  const path2 = path.join(REPORTS_DIR, path.basename(report2));
+
+  if (!fs.existsSync(path1)) return res.status(404).json({ error: `Report not found: ${report1}` });
+  if (!fs.existsSync(path2)) return res.status(404).json({ error: `Report not found: ${report2}` });
+
+  const content1 = fs.readFileSync(path1, 'utf8');
+  const content2 = fs.readFileSync(path2, 'utf8');
+
+  const prompt = [
+    'You are an expert analyst comparing two AI-generated reports to evaluate LLM output quality differences.',
+    'Compare the two reports below and return a JSON object with exactly this structure:',
+    '{',
+    '  "summary": "2-3 sentence overall comparison",',
+    '  "contentDifferences": [',
+    '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
+    '  ],',
+    '  "formattingDifferences": [',
+    '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
+    '  ],',
+    '  "overallVerdict": "report1_better | report2_better | comparable",',
+    '  "overallReason": "string"',
+    '}',
+    '',
+    'For contentDifferences, evaluate aspects like: accuracy, completeness, depth of analysis, actionability, key insights quality.',
+    'For formattingDifferences, evaluate aspects like: structure, use of headings, use of lists/tables, readability, length appropriateness.',
+    'Return ONLY the JSON object, no markdown code fences, no extra text.',
+    '',
+    `=== REPORT 1: ${report1} ===`,
+    content1,
+    '',
+    `=== REPORT 2: ${report2} ===`,
+    content2
+  ].join('\n');
+
+  try {
+    let text;
+    if (llmSettings.useOllama) {
+      text = await generateLightReportWithOllama(prompt);
+    } else if (llmSettings.useGemini) {
+      text = await generateLightReportWithGemini(prompt);
+    } else {
+      text = await generateLightReportWithClaude(prompt);
+    }
+
+    // Strip markdown fences if the LLM wrapped the JSON anyway
+    const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    let comparison;
+    try {
+      comparison = JSON.parse(cleaned);
+    } catch {
+      return res.status(500).json({ error: 'LLM returned invalid JSON', raw: text });
+    }
+
+    const activeModel = llmSettings.useOllama
+      ? `Local Ollama (${llmSettings.ollamaModel})`
+      : llmSettings.useGemini
+        ? `Gemini (${llmSettings.geminiModel})`
+        : `Claude (${llmSettings.claudeModel})`;
+
+    res.json({ comparison, model: activeModel });
+  } catch (err) {
+    console.error('[compare] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Favorites API ---
+
+app.get('/api/favorites', (req, res) => {
+  res.json(loadFavorites());
+});
+
+app.post('/api/favorites/:reportId', (req, res) => {
+  const { reportId } = req.params;
+  const favorites = loadFavorites();
+  if (!favorites.includes(reportId)) {
+    favorites.push(reportId);
+    saveFavorites(favorites);
+  }
+  res.json(favorites);
+});
+
+app.delete('/api/favorites/:reportId', (req, res) => {
+  const { reportId } = req.params;
+  const favorites = loadFavorites().filter(id => id !== reportId);
+  saveFavorites(favorites);
+  res.json(favorites);
+});
+
 // Get unique agent names
 app.get('/api/agents', (req, res) => {
   try {
@@ -1229,10 +1377,6 @@ app.put('/api/settings/llm', (req, res) => {
     if (useGemini !== undefined && typeof useGemini !== 'boolean') {
       return res.status(400).json({ error: 'Invalid useGemini value' });
     }
-    // Ensure only one backend is active at a time
-    if (useOllama && useGemini) {
-      return res.status(400).json({ error: 'Cannot enable both Ollama and Gemini simultaneously' });
-    }
 
     // Update settings
     if (useOllama !== undefined) llmSettings.useOllama = useOllama;
@@ -1241,6 +1385,8 @@ app.put('/api/settings/llm', (req, res) => {
     if (ollamaApiKey !== undefined) llmSettings.ollamaApiKey = ollamaApiKey;
     if (claudeModel) llmSettings.claudeModel = claudeModel;
     if (geminiModel) llmSettings.geminiModel = geminiModel;
+
+    savePersistedLLMSettings(llmSettings);
 
     const activeBackend = llmSettings.useOllama ? 'Ollama' : llmSettings.useGemini ? 'Gemini' : 'Claude';
     const activeModel = llmSettings.useOllama ? llmSettings.ollamaModel : llmSettings.useGemini ? llmSettings.geminiModel : llmSettings.claudeModel;
@@ -1564,8 +1710,165 @@ app.post('/api/mcp-clear-cache', async (req, res) => {
   }
 });
 
+// ─── Manual Sources Upload ────────────────────────────────────────────────────
+
+const MANUAL_SOURCES_DIR = path.join(__dirname, '..', 'manual_sources');
+
+// Week folder validation: only "week" followed by 1–3 digits (case-insensitive)
+function isValidWeekFolder(name) {
+  return /^week\d{1,3}$/i.test(name);
+}
+
+// Allowed upload extensions
+const ALLOWED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv', '.pdf', '.png', '.jpg', '.jpeg', '.md']);
+
+// Multer storage — destination and filename resolved at request time
+const uploadStorage = multer.diskStorage({
+  destination(req, file, cb) {
+    const week = (req.params.week || '').trim().toLowerCase();
+    if (!isValidWeekFolder(week)) {
+      return cb(new Error('Invalid week folder name'));
+    }
+    const dest = path.join(MANUAL_SOURCES_DIR, week);
+    // Ensure it stays inside manual_sources
+    const resolved = path.resolve(dest);
+    const base = path.resolve(MANUAL_SOURCES_DIR);
+    if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+      return cb(new Error('Path traversal detected'));
+    }
+    fs.mkdirSync(dest, { recursive: true });
+    cb(null, dest);
+  },
+  filename(req, file, cb) {
+    // Strip any path components, keep only the base filename
+    const safeName = path.basename(file.originalname).replace(/[^a-zA-Z0-9.\-_ ()[\]]/g, '_');
+    const ext = path.extname(safeName).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return cb(new Error(`File type not allowed: ${ext}`));
+    }
+    cb(null, safeName);
+  }
+});
+
+const upload = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB per file
+  fileFilter(req, file, cb) {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      return cb(new Error(`File type not allowed: ${ext}`));
+    }
+    cb(null, true);
+  }
+});
+
+// POST /api/upload/:week — upload one or more files into manual_sources/<week>/
+app.post('/api/upload/:week', (req, res) => {
+  const week = (req.params.week || '').trim().toLowerCase();
+  if (!isValidWeekFolder(week)) {
+    return res.status(400).json({ error: 'Invalid week folder. Use format: week1, week9, week10, etc.' });
+  }
+
+  upload.array('files', 20)(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'File too large. Maximum size is 25 MB.' });
+      }
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    }
+    if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files received.' });
+    }
+    const uploaded = req.files.map(f => ({ name: f.filename, size: f.size }));
+    res.json({ success: true, week, files: uploaded });
+  });
+});
+
+// GET /api/upload/:week — list files in manual_sources/<week>/
+app.get('/api/upload/:week', (req, res) => {
+  const week = (req.params.week || '').trim().toLowerCase();
+  if (!isValidWeekFolder(week)) {
+    return res.status(400).json({ error: 'Invalid week folder name.' });
+  }
+  const dir = path.join(MANUAL_SOURCES_DIR, week);
+  if (!fs.existsSync(dir)) {
+    return res.json({ week, files: [] });
+  }
+  const files = fs.readdirSync(dir)
+    .filter(f => {
+      const ext = path.extname(f).toLowerCase();
+      return ALLOWED_EXTENSIONS.has(ext);
+    })
+    .map(f => {
+      const stat = fs.statSync(path.join(dir, f));
+      return { name: f, size: stat.size, modified: stat.mtime };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ week, files });
+});
+
+// DELETE /api/upload/:week/:filename — remove a single file
+app.delete('/api/upload/:week/:filename', (req, res) => {
+  const week = (req.params.week || '').trim().toLowerCase();
+  const filename = path.basename(req.params.filename || '');
+  if (!isValidWeekFolder(week)) {
+    return res.status(400).json({ error: 'Invalid week folder name.' });
+  }
+  if (!filename) {
+    return res.status(400).json({ error: 'Invalid filename.' });
+  }
+  const ext = path.extname(filename).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    return res.status(400).json({ error: 'File type not allowed.' });
+  }
+  const filePath = path.join(MANUAL_SOURCES_DIR, week, filename);
+  // Prevent traversal: resolved path must stay inside manual_sources/<week>
+  const resolved = path.resolve(filePath);
+  const base = path.resolve(path.join(MANUAL_SOURCES_DIR, week));
+  if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+    return res.status(400).json({ error: 'Path traversal detected.' });
+  }
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found.' });
+  }
+  fs.unlinkSync(filePath);
+  res.json({ success: true, deleted: filename });
+});
+
+// GET /api/upload-weeks — list all existing week folders in manual_sources
+app.get('/api/upload-weeks', (req, res) => {
+  if (!fs.existsSync(MANUAL_SOURCES_DIR)) {
+    return res.json({ weeks: [] });
+  }
+  const weeks = fs.readdirSync(MANUAL_SOURCES_DIR)
+    .filter(entry => {
+      if (!isValidWeekFolder(entry)) return false;
+      return fs.statSync(path.join(MANUAL_SOURCES_DIR, entry)).isDirectory();
+    })
+    .sort((a, b) => {
+      const na = parseInt(a.replace(/\D/g, ''), 10);
+      const nb = parseInt(b.replace(/\D/g, ''), 10);
+      return nb - na; // newest first
+    });
+  res.json({ weeks });
+});
+
+// ─── End Manual Sources Upload ────────────────────────────────────────────────
+
 // Handle client-side routing - serve index.html for .md URLs
 app.get('/*.md', (req, res) => {
+  if (fs.existsSync(DIST_DIR)) {
+    res.sendFile(path.join(DIST_DIR, 'index.html'));
+  } else {
+    res.status(404).send('Frontend not built. Run: cd frontend && npm run build');
+  }
+});
+
+// SPA catch-all: serve index.html for any non-API route (enables client-side routing)
+app.get('*', (req, res) => {
   if (fs.existsSync(DIST_DIR)) {
     res.sendFile(path.join(DIST_DIR, 'index.html'));
   } else {

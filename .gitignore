@@ -8,6 +8,7 @@ package-lock.json
 # Configuration (contains sensitive data)
 config.json
 private-google-cal.json
+frontend/vite.config.js
 
 # TODOs for myself
 TODO-PRIVATE.md
@@ -68,3 +69,5 @@ setup-daily-cron.sh
 claude_desktop_config_dontuse.json
 OLLAMA_INTEGRATION.md
 OLLAMA_SETUP.md
+llm-settings.json
+frontend/vite.config.js

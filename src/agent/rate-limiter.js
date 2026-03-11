@@ -4,6 +4,7 @@
  */
 
 import { RATE_LIMITING, TOKEN_LIMITS, RETRY_CONFIG } from '../utils/constants.js';
+import { sleep } from '../utils/helpers.js';
 
 /**
  * Rate Limiter Class
@@ -18,13 +19,6 @@ export class RateLimiter {
 
   /**
    * Sleep utility
-   * @param {number} ms - Milliseconds to sleep
-   * @returns {Promise<void>}
-   */
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
   /**
    * Clean up old token usage entries (older than 1 minute)
    */
@@ -102,7 +96,7 @@ export class RateLimiter {
           usageRatio * 100
         )}%), estimated request: ${estimatedTokens} tokens, waiting ${Math.ceil(waitTime / 1000)}s...`
       );
-      await this.sleep(Math.min(waitTime, RATE_LIMITING.MAX_WAIT_TIME));
+      await sleep(Math.min(waitTime, RATE_LIMITING.MAX_WAIT_TIME));
     } else if (usageRatio > RATE_LIMITING.RATE_LIMIT_THRESHOLD) {
       // If we're over threshold, use longer delays
       const waitTime = Math.max(
@@ -114,10 +108,10 @@ export class RateLimiter {
           usageRatio * 100
         )}%), waiting ${Math.ceil(waitTime / 1000)}s...`
       );
-      await this.sleep(waitTime);
+      await sleep(waitTime);
     } else if (timeSinceLastCall < RATE_LIMITING.MIN_DELAY_BETWEEN_CALLS) {
       const waitTime = RATE_LIMITING.MIN_DELAY_BETWEEN_CALLS - timeSinceLastCall;
-      await this.sleep(waitTime);
+      await sleep(waitTime);
     }
 
     this.lastCallTime = Date.now();
@@ -146,7 +140,7 @@ export class RateLimiter {
 
       // Wait for rate limit window to clear
       const waitForWindow = RETRY_CONFIG.RATE_LIMIT_CLEAR_WINDOW;
-      await this.sleep(Math.max(backoffTime, waitForWindow));
+      await sleep(Math.max(backoffTime, waitForWindow));
 
       // Reset token usage window if we've had multiple consecutive errors
       if (this.consecutiveRateLimitErrors >= RETRY_CONFIG.CONSECUTIVE_ERROR_RESET_THRESHOLD) {

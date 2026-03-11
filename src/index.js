@@ -10,6 +10,7 @@ import { ReportGenerator } from './report-generator.js';
 import { ConfigManager, validateEnvironment } from './config/config-manager.js';
 import { parseCliArguments, displayHelp, logParsedArguments, validateAgentRequirements } from './utils/cli-parser.js';
 import { AGENT_EXECUTION, PATHS } from './utils/constants.js';
+import { sleep } from './utils/helpers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -102,13 +103,6 @@ class ChiefOfStaffAgent {
   }
 
   /**
-   * Sleep utility
-   */
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
    * Run all agents
    */
   async runAllAgents() {
@@ -134,7 +128,7 @@ class ChiefOfStaffAgent {
         if (i < this.agents.length - 1) {
           const delay = AGENT_EXECUTION.DELAY_BETWEEN_AGENTS;
           console.log(`Waiting ${delay / 1000} seconds before next agent...\n`);
-          await this.sleep(delay);
+          await sleep(delay);
         }
       } catch (error) {
         console.error(`Error executing ${agentName}:`, error.message);
@@ -148,7 +142,7 @@ class ChiefOfStaffAgent {
         if (i < this.agents.length - 1) {
           const delay = AGENT_EXECUTION.DELAY_BETWEEN_AGENTS_ON_ERROR;
           console.log(`Waiting ${delay / 1000} seconds before next agent...\n`);
-          await this.sleep(delay);
+          await sleep(delay);
         }
       }
     }
@@ -191,7 +185,7 @@ class ChiefOfStaffAgent {
         if (i < validAgents.length - 1) {
           const delay = AGENT_EXECUTION.DELAY_FOR_SPECIFIC_AGENTS;
           console.log(`Waiting ${delay / 1000} seconds before next agent...\n`);
-          await this.sleep(delay);
+          await sleep(delay);
         }
       } catch (error) {
         console.error(`Error executing ${agentName}:`, error.message);
@@ -205,7 +199,7 @@ class ChiefOfStaffAgent {
         if (i < validAgents.length - 1) {
           const delay = AGENT_EXECUTION.DELAY_FOR_SPECIFIC_AGENTS;
           console.log(`Waiting ${delay / 1000} seconds before next agent...\n`);
-          await this.sleep(delay);
+          await sleep(delay);
         }
       }
     }

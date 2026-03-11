@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { MCP_DEFAULTS, MIXPANEL_RATE_LIMITS } from './utils/constants.js';
 import { MixpanelRateLimiter } from './agent/mixpanel-rate-limiter.js';
+import { sleep } from './utils/helpers.js';
 
 /**
  * MCP Client Manager
@@ -137,13 +138,6 @@ export class MCPClientManager {
   }
 
   /**
-   * Sleep utility for retry delays
-   */
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
    * Wrapper to add timeout to a promise
    */
   async withTimeout(promise, timeoutMs, operationName) {
@@ -205,7 +199,7 @@ export class MCPClientManager {
         if (attempt > 1) {
           const delay = this.retryDelay * Math.pow(2, attempt - 2); // Exponential backoff
           console.log(`  Retrying ${serverName} (attempt ${attempt}/${this.maxRetries}) after ${delay}ms...`);
-          await this.sleep(delay);
+          await sleep(delay);
         }
         
         await this.connectToServer(serverName, serverConfig);
@@ -433,6 +427,11 @@ export class MCPClientManager {
         this.logJiraResults(toolName, result);
       }
 
+      // Fix malformed Reddit URLs from mcp-reddit (bug: prepends https://reddit.com to full URLs)
+      if (toolInfo.serverName === 'reddit') {
+        return this.fixRedditUrls(result);
+      }
+
       return result;
     }
   }
@@ -561,6 +560,28 @@ export class MCPClientManager {
       server: info.serverName,
       schema: info.schema
     }));
+  }
+
+  /**
+   * Fix malformed Reddit URLs returned by mcp-reddit.
+   * The tool concatenates a bare "https://reddit.com" prefix onto already-full URLs,
+   * producing "https://reddit.comhttps://www.reddit.com/r/...". Strip the prefix.
+   */
+  fixRedditUrls(result) {
+    try {
+      const fix = (text) => text.replace(/https:\/\/reddit\.com(https:\/\/www\.reddit\.com)/g, '$1');
+      if (result?.content) {
+        result.content = result.content.map(item =>
+          item.type === 'text' ? { ...item, text: fix(item.text) } : item
+        );
+      }
+      if (result?.structuredContent?.result) {
+        result.structuredContent.result = fix(result.structuredContent.result);
+      }
+    } catch (e) {
+      // Never break tool results over a URL fix
+    }
+    return result;
   }
 
   /**
