@@ -59,9 +59,26 @@ export class ReportGenerator {
     report += this.buildReportFooter();
 
     // Determine report name based on number of agents
-    const reportName = agentResults.length === 1
-      ? agentResults[0].agentName
-      : REPORT.DEFAULT_NAME;
+    // For split agents (e.g. thoughtleadership-rss + thoughtleadership-web), use the
+    // shared prefix as the report name so it shows up correctly in the report list.
+    let reportName;
+    if (agentResults.length === 1) {
+      reportName = agentResults[0].agentName;
+    } else {
+      // Check if all agent names share a common prefix separated by '-'
+      const names = agentResults.map(r => r.agentName);
+      const parts0 = names[0].split('-');
+      let sharedParts = [];
+      for (let i = 1; i <= parts0.length; i++) {
+        const prefix = parts0.slice(0, i).join('-');
+        if (names.every(n => n.startsWith(prefix + '-') || n === prefix)) {
+          sharedParts = parts0.slice(0, i);
+        } else {
+          break;
+        }
+      }
+      reportName = sharedParts.length > 0 ? sharedParts.join('-') + '-updates' : REPORT.DEFAULT_NAME;
+    }
 
     // Save report as markdown
     console.log('[ReportGenerator] Generating Markdown...');
@@ -178,6 +195,9 @@ export class ReportGenerator {
 
     // Build metadata section
     let metadata = '';
+    if (result.hallucinationWarning) {
+      metadata += `> ⚠️ **HALLUCINATION WARNING**: This agent made **0 tool calls** despite having tools available. The content below may be entirely fabricated by the LLM. Do not act on this report — re-run with Claude instead of ${result.llmBackend}.\n\n`;
+    }
     if (result.manualSourcesFolder) {
       metadata += `**Manual Sources Folder**: ${result.manualSourcesFolder}\n`;
     }

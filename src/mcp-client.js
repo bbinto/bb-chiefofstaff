@@ -225,10 +225,20 @@ export class MCPClientManager {
     // Inject Mixpanel credentials from config if this is a Mixpanel MCP server
     const mixpanelEnv = this.getMixpanelEnvVars(serverName);
     
+    // nytimes-mcp uses pydantic-settings with extra=forbid: it crashes if it receives any
+    // env var outside its own schema. It also reads .env files from CWD via python-dotenv,
+    // which picks up our app's .env. Fix: give it a minimal env and run it from /tmp.
+    // All other servers get the standard merged process.env as before.
+    const needsIsolatedEnv = serverName.toLowerCase().includes('nytimes');
+    const baseEnv = needsIsolatedEnv
+      ? { PATH: process.env.PATH, HOME: process.env.HOME, USER: process.env.USER }
+      : { ...process.env, NODE_NO_WARNINGS: '1' };
+
     const transport = new StdioClientTransport({
       command,
       args,
-      env: { ...process.env, NODE_NO_WARNINGS: '1', ...env, ...mixpanelEnv }
+      env: { ...baseEnv, ...env, ...mixpanelEnv },
+      ...(needsIsolatedEnv ? { cwd: '/tmp' } : {})
     });
 
     const client = new Client({

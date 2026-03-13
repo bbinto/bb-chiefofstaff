@@ -935,31 +935,34 @@ app.post('/api/reports/compare', async (req, res) => {
   const content1 = fs.readFileSync(path1, 'utf8');
   const content2 = fs.readFileSync(path2, 'utf8');
 
-  const prompt = [
-    'You are an expert analyst comparing two AI-generated reports to evaluate LLM output quality differences.',
-    'Compare the two reports below and return a JSON object with exactly this structure:',
-    '{',
-    '  "summary": "2-3 sentence overall comparison",',
-    '  "contentDifferences": [',
-    '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
-    '  ],',
-    '  "formattingDifferences": [',
-    '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
-    '  ],',
-    '  "overallVerdict": "report1_better | report2_better | comparable",',
-    '  "overallReason": "string"',
-    '}',
-    '',
-    'For contentDifferences, evaluate aspects like: accuracy, completeness, depth of analysis, actionability, key insights quality.',
-    'For formattingDifferences, evaluate aspects like: structure, use of headings, use of lists/tables, readability, length appropriateness.',
-    'Return ONLY the JSON object, no markdown code fences, no extra text.',
-    '',
-    `=== REPORT 1: ${report1} ===`,
-    content1,
-    '',
-    `=== REPORT 2: ${report2} ===`,
-    content2
-  ].join('\n');
+  const prompt = {
+    system: [
+      'You are an expert analyst comparing two AI-generated reports to evaluate LLM output quality differences.',
+      'Compare the two reports below and return a JSON object with exactly this structure:',
+      '{',
+      '  "summary": "2-3 sentence overall comparison",',
+      '  "contentDifferences": [',
+      '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
+      '  ],',
+      '  "formattingDifferences": [',
+      '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
+      '  ],',
+      '  "overallVerdict": "report1_better | report2_better | comparable",',
+      '  "overallReason": "string"',
+      '}',
+      '',
+      'For contentDifferences, evaluate aspects like: accuracy, completeness, depth of analysis, actionability, key insights quality.',
+      'For formattingDifferences, evaluate aspects like: structure, use of headings, use of lists/tables, readability, length appropriateness.',
+      'Return ONLY the JSON object, no markdown code fences, no extra text.',
+    ].join('\n'),
+    user: [
+      `=== REPORT 1: ${report1} ===`,
+      content1,
+      '',
+      `=== REPORT 2: ${report2} ===`,
+      content2
+    ].join('\n'),
+  };
 
   try {
     let text;
@@ -1071,8 +1074,17 @@ app.post('/api/run-agents', async (req, res) => {
     // Build command arguments (for direct node invocation, not npm)
     const args = [];
 
+    // Split thoughtleadership-updates into two focused sub-agents to stay under token limits:
+    //   thoughtleadership-rss  → RSS feeds, AI Critics, Reddit, NYTimes (API tools only)
+    //   thoughtleadership-web  → Web sources, Industry News (web browsing only)
+    const expandedAgents = agents.flatMap(a =>
+      a === 'thoughtleadership-updates'
+        ? ['thoughtleadership-rss', 'thoughtleadership-web']
+        : [a]
+    );
+
     // Add agent names
-    agents.forEach(agent => args.push(agent));
+    expandedAgents.forEach(agent => args.push(agent));
 
     // Add date range if provided
     console.log('Date range check - startDate:', dateRange?.startDate, 'endDate:', dateRange?.endDate);
@@ -1921,12 +1933,16 @@ app.post('/api/llm-eval/run', async (req, res) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
-        body: JSON.stringify({ model, messages })
+        body: JSON.stringify({ model, messages, max_tokens: 2048 })
       });
 
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error?.message || `Gemini API error ${r.status}`);
       response = data?.choices?.[0]?.message?.content || '';
+      if (!response) {
+        const fr = data?.choices?.[0]?.finish_reason;
+        throw new Error(`Gemini returned no content (finish_reason: ${fr ?? 'null'}). The model may have blocked the request — try a different model or simplify the prompt.`);
+      }
 
     } else if (backend === 'ollama') {
       const endpoint = buildOllamaChatUrl(llmSettings.ollamaBaseUrl);
@@ -1954,6 +1970,57 @@ app.post('/api/llm-eval/run', async (req, res) => {
     res.json({ response, latencyMs: Date.now() - start, model, backend });
   } catch (err) {
     res.json({ error: err.message, latencyMs: Date.now() - start, model, backend });
+  }
+});
+
+const EVAL_NOTES_FILE = path.join(__dirname, '..', 'llm-eval-notes.json');
+const REPORT_NOTES_FILE = path.join(__dirname, '..', 'report-notes.json');
+
+function loadReportNotes() {
+  try {
+    return fs.existsSync(REPORT_NOTES_FILE) ? JSON.parse(fs.readFileSync(REPORT_NOTES_FILE, 'utf8')) : {};
+  } catch { return {}; }
+}
+
+// Returns set of filenames that have non-empty notes
+app.get('/api/reports-notes-index', (req, res) => {
+  const all = loadReportNotes();
+  const withNotes = Object.keys(all).filter(k => all[k] && all[k].trim().length > 0);
+  res.json({ filenames: withNotes });
+});
+
+app.get('/api/reports/:filename/notes', (req, res) => {
+  const all = loadReportNotes();
+  res.json({ notes: all[req.params.filename] || '' });
+});
+
+app.post('/api/reports/:filename/notes', (req, res) => {
+  try {
+    const all = loadReportNotes();
+    all[req.params.filename] = req.body.notes ?? '';
+    fs.writeFileSync(REPORT_NOTES_FILE, JSON.stringify(all, null, 2));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/llm-eval/notes', (req, res) => {
+  try {
+    const data = fs.existsSync(EVAL_NOTES_FILE) ? JSON.parse(fs.readFileSync(EVAL_NOTES_FILE, 'utf8')) : { notes: '' };
+    res.json(data);
+  } catch {
+    res.json({ notes: '' });
+  }
+});
+
+app.post('/api/llm-eval/notes', (req, res) => {
+  try {
+    const { notes } = req.body;
+    fs.writeFileSync(EVAL_NOTES_FILE, JSON.stringify({ notes: notes ?? '' }, null, 2));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

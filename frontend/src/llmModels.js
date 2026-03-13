@@ -14,8 +14,6 @@ export const CLAUDE_MODELS = [
 export const GEMINI_MODELS = [
   { value: 'gemini-2.5-flash',     label: 'Gemini 2.5 Flash',      tag: 'Balanced' },
   { value: 'gemini-2.5-pro',       label: 'Gemini 2.5 Pro',        tag: 'Highest quality' },
-  { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite', tag: 'Budget' },
-  { value: 'gemini-1.5-flash',     label: 'Gemini 1.5 Flash',      tag: 'Legacy' },
 ]
 
 export const OLLAMA_CLOUD_MODELS = [
@@ -24,6 +22,8 @@ export const OLLAMA_CLOUD_MODELS = [
   { value: 'deepseek-v3.1:671b-cloud',    label: 'DeepSeek V3.1 671B',     tag: 'High quality' },
   { value: 'nemotron-3-nano:30b-cloud',   label: 'Nemotron 3 Nano 30B',    tag: 'Low latency' },
   { value: 'glm-5:cloud',                 label: 'GLM-5',                  tag: 'General purpose' },
+  { value: 'qwen3.5:397b-cloud',          label: 'Qwen3.5 397B',           tag: 'High quality' },
+  { value: 'nemotron-3-super:cloud',      label: 'Nemotron 3 Super',       tag: 'High quality' },
 ]
 
 export const OLLAMA_LOCAL_MODELS = [

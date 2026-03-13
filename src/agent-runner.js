@@ -235,9 +235,26 @@ export class AgentRunner {
     const content = [];
     let stopReason = 'end_turn';
 
-    if (openaiResponse.choices && openaiResponse.choices[0]) {
+    // If Gemini returns no choices at all (empty array or missing), it rejected the prompt outright
+    if (!openaiResponse.choices || openaiResponse.choices.length === 0) {
+      const promptFeedback = openaiResponse.promptFeedback || openaiResponse.prompt_feedback;
+      const blockReason = promptFeedback?.blockReason || promptFeedback?.block_reason || 'unknown';
+      throw new Error(`Gemini returned no choices (prompt rejected before generation). Block reason: ${blockReason}. This often happens when the system prompt or tool list triggers Gemini's safety filters. Consider using Claude for tool-heavy agents.`);
+    }
+
+    if (openaiResponse.choices[0]) {
       const choice = openaiResponse.choices[0];
       const message = choice.message;
+      const finishReason = choice.finish_reason;
+
+      // Detect Gemini safety/recitation blocks — these return null content and a blocked finish_reason
+      const blockedReasons = ['recitation', 'content_filter', 'safety'];
+      if (blockedReasons.includes(finishReason)) {
+        const readable = finishReason === 'recitation'
+          ? 'RECITATION (Gemini refused to reproduce web/RSS article content — use Claude for agents that fetch external content)'
+          : `${finishReason.toUpperCase()} (Gemini safety filter blocked the response)`;
+        throw new Error(`Gemini blocked the response: ${readable}`);
+      }
 
       // Plain text content
       if (message?.content) {
@@ -245,7 +262,7 @@ export class AgentRunner {
       }
 
       // Tool calls → Anthropic tool_use blocks
-      if (choice.finish_reason === 'tool_calls' && message?.tool_calls?.length > 0) {
+      if (finishReason === 'tool_calls' && message?.tool_calls?.length > 0) {
         for (const tc of message.tool_calls) {
           let input = {};
           try { input = JSON.parse(tc.function.arguments); } catch { input = { _raw: tc.function.arguments }; }
@@ -253,7 +270,12 @@ export class AgentRunner {
         }
         stopReason = 'tool_use';
       } else {
-        stopReason = choice.finish_reason === 'stop' ? 'end_turn' : (choice.finish_reason || 'end_turn');
+        stopReason = finishReason === 'stop' ? 'end_turn' : (finishReason || 'end_turn');
+      }
+
+      // If Gemini returned stop but no content and no tool calls, surface it rather than silently saving a blank report
+      if (content.length === 0 && stopReason === 'end_turn') {
+        throw new Error('Gemini returned an empty response with no content and no tool calls. The model may have hit its output limit or been blocked by a filter.');
       }
     }
 
@@ -298,6 +320,17 @@ export class AgentRunner {
     if (!response.ok) {
       const errMsg = data?.error?.message || data?.error || responseText.slice(0, 300);
       throw new Error(`Gemini API error (${response.status}): ${errMsg}`);
+    }
+
+    // Log response summary for debugging empty/blocked responses
+    const choice0 = data?.choices?.[0];
+    const finishReason = choice0?.finish_reason;
+    const outputTokens = data?.usage?.completion_tokens ?? 0;
+    if (outputTokens === 0 || !choice0?.message?.content) {
+      console.warn(`⚠️  Gemini suspicious response: finish_reason=${JSON.stringify(finishReason)}, outputTokens=${outputTokens}, content=${JSON.stringify(choice0?.message?.content)?.slice(0, 100)}, choices.length=${data?.choices?.length ?? 0}`);
+      if (data?.promptFeedback || data?.prompt_feedback) {
+        console.warn(`⚠️  Gemini promptFeedback:`, JSON.stringify(data.promptFeedback || data.prompt_feedback));
+      }
     }
 
     return data;
@@ -587,7 +620,32 @@ export class AgentRunner {
     ];
 
     // Get available tools from MCP (filtered by agent type)
-    const tools = this.buildToolsSchema(agentName);
+    let tools = this.buildToolsSchema(agentName);
+
+    // Gemini silently returns empty responses when given too many tools.
+    // Cap using config limit and honour priorityServers ordering.
+    if (this.useGemini) {
+      const geminiConfig = this.config?.gemini || {};
+      const maxTools = geminiConfig.maxTools ?? 20;
+      const priorityServers = (geminiConfig.priorityServers || []).map(s => s.toLowerCase());
+
+      if (tools.length > maxTools) {
+        // Sort: priority-server tools first, then the rest (preserve relative order within each group)
+        if (priorityServers.length > 0) {
+          const isPriority = t => priorityServers.some(p => (t._server || t.name || '').toLowerCase().includes(p));
+          const priority = tools.filter(t => isPriority(t));
+          const rest = tools.filter(t => !isPriority(t));
+          tools = [...priority, ...rest];
+        }
+        console.warn(`⚠️  Gemini tool limit: capping ${tools.length} tools to ${maxTools}. Priority servers: [${priorityServers.join(', ')}]. Keeping: ${tools.slice(0, maxTools).map(t => t.name).join(', ')}`);
+        tools = tools.slice(0, maxTools);
+      }
+      // Strip internal _server field before sending to API
+      tools = tools.map(({ _server, ...t }) => t);
+    } else {
+      // Strip _server for non-Gemini paths too
+      tools = tools.map(({ _server, ...t }) => t);
+    }
 
     // Debug: Log tool names being sent to Claude
     console.log(`\n🔧 Tools available to ${agentName}:`, tools.map(t => t.name).slice(0, 10).join(', '), tools.length > 10 ? `... and ${tools.length - 10} more` : '');
@@ -773,6 +831,8 @@ export class AgentRunner {
         messages
       });
 
+      let totalToolCallsMade = 0;
+
       // Handle tool use loop
       while (response.stop_reason === 'tool_use') {
         // Find ALL tool_use blocks in the response (Claude can make multiple parallel tool calls)
@@ -780,6 +840,7 @@ export class AgentRunner {
 
         if (toolUses.length === 0) break;
 
+        totalToolCallsMade += toolUses.length;
         console.log(`Agent is using ${toolUses.length} tool(s): ${toolUses.map(t => t.name).join(', ')}`);
 
         // Execute all tools in parallel
@@ -971,6 +1032,13 @@ export class AgentRunner {
       const executionTimeSec = (executionTimeMs / 1000).toFixed(2);
       const executionTimeMin = (executionTimeMs / 60000).toFixed(2);
 
+      // Warn if agent made zero tool calls despite having tools available — likely hallucination.
+      const agentHasTools = tools.length > 0;
+      const zeroToolCalls = totalToolCallsMade === 0 && agentHasTools;
+      if (zeroToolCalls) {
+        console.warn(`⚠️  [${agentName}] Agent completed without making ANY tool calls despite ${tools.length} tools being available. Output may be hallucinated.`);
+      }
+
       const result = {
         agentName,
         success: true,
@@ -979,6 +1047,8 @@ export class AgentRunner {
         executionTimeMs,
         executionTimeSec,
         executionTimeMin,
+        toolCallsMade: totalToolCallsMade,
+        hallucinationWarning: zeroToolCalls,
         llmBackend: this.useOllama ? 'Ollama' : this.useGemini ? 'Gemini' : 'Claude',
         llmModel: this.model
       };
@@ -1443,6 +1513,24 @@ ${(() => {
       console.log(`[buildToolsSchema] Filtered tools for feature-telemetry-tracking: Mixpanel-only, ${filteredTools.length} tools available`);
     }
 
+    // thoughtleadership-rss: RSS + Reddit + NYTimes only (keeps token count low)
+    if (agentName === 'thoughtleadership-rss') {
+      filteredTools = filteredTools.filter(tool => {
+        const server = (tool.server || '').toLowerCase();
+        return server.includes('rss') || server.includes('reddit') || server.includes('nytimes');
+      });
+      console.log(`[buildToolsSchema] Filtered tools for thoughtleadership-rss: RSS/Reddit/NYTimes only, ${filteredTools.length} tools`);
+    }
+
+    // thoughtleadership-web: web browsing only (keeps token count low)
+    if (agentName === 'thoughtleadership-web') {
+      filteredTools = filteredTools.filter(tool => {
+        const server = (tool.server || '').toLowerCase();
+        return server.includes('read-website') || server.includes('website') || server.includes('browser') || server.includes('fetch');
+      });
+      console.log(`[buildToolsSchema] Filtered tools for thoughtleadership-web: web browsing only, ${filteredTools.length} tools`);
+    }
+
     const mcpTools = filteredTools.map(tool => ({
       name: tool.name,
       description: tool.schema.description || `Tool from ${tool.server} server`,
@@ -1450,7 +1538,8 @@ ${(() => {
         type: 'object',
         properties: {},
         required: []
-      }
+      },
+      _server: tool.server  // preserved for Gemini priority sorting; stripped before API call
     }));
 
     // Add custom filesystem tools using ToolHandler (always include)

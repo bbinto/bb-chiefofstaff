@@ -22,6 +22,7 @@ function AppContent() {
   const [agents, setAgents] = useState([])
   const [selectedAgent, setSelectedAgent] = useState('all')
   const [selectedWeek, setSelectedWeek] = useState('all')
+  const [selectedLlm, setSelectedLlm] = useState('all')
   const [favorites, setFavorites] = useState([])
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -155,6 +156,7 @@ function AppContent() {
   }
 
   const reportWeeks = [...new Set(reports.map(report => getWeekNumber(report.timestamp)))]
+  const llmModels = [...new Set(reports.map(r => r.llm).filter(Boolean))].sort()
 
   const predefinedWeeks = [
     '2026-W01', '2026-W02', '2026-W03', '2026-W04', '2026-W05',
@@ -166,8 +168,9 @@ function AppContent() {
   const filteredReports = reports.filter(report => {
     const matchesAgent = selectedAgent === 'all' || report.agentName === selectedAgent
     const matchesWeek = selectedWeek === 'all' || getWeekNumber(report.timestamp) === selectedWeek
+    const matchesLlm = selectedLlm === 'all' || report.llm === selectedLlm
     const matchesFavorites = !showFavoritesOnly || favorites.includes(report.id)
-    return matchesAgent && matchesWeek && matchesFavorites
+    return matchesAgent && matchesWeek && matchesLlm && matchesFavorites
   })
 
   const totalCost = filteredReports.reduce((sum, report) => sum + (report.cost || 0), 0)
@@ -314,6 +317,9 @@ function AppContent() {
                 selectedWeek={selectedWeek}
                 onWeekChange={setSelectedWeek}
                 formatWeekDisplay={formatWeekDisplay}
+                llmModels={llmModels}
+                selectedLlm={selectedLlm}
+                onLlmChange={setSelectedLlm}
                 reportCount={filteredReports.length}
                 totalCost={totalCost}
                 showFavoritesOnly={showFavoritesOnly}
@@ -324,6 +330,7 @@ function AppContent() {
                 onReportSelect={(report) => navigate(`/${report.filename}`)}
                 favorites={favorites}
                 onToggleFavorite={toggleFavorite}
+                password={password}
               />
             </>
           } />

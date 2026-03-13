@@ -1,4 +1,18 @@
-function ReportList({ reports, onReportSelect, favorites = [], onToggleFavorite }) {
+import { useState, useEffect } from 'react'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
+
+function ReportList({ reports, onReportSelect, favorites = [], onToggleFavorite, password }) {
+  const [notedFilenames, setNotedFilenames] = useState(new Set())
+
+  useEffect(() => {
+    const headers = password ? { 'x-app-password': password } : {}
+    fetch(`${API_URL}/api/reports-notes-index`, { headers })
+      .then(r => r.ok ? r.json() : { filenames: [] })
+      .then(data => setNotedFilenames(new Set(data.filenames || [])))
+      .catch(() => {})
+  }, [password])
+
   const toggleFavorite = (e, reportId) => {
     e.stopPropagation()
     onToggleFavorite(reportId)
@@ -6,10 +20,7 @@ function ReportList({ reports, onReportSelect, favorites = [], onToggleFavorite 
 
   const isFavorite = (reportId) => favorites.includes(reportId)
 
-  const hasNotes = (reportFilename) => {
-    const savedNotes = localStorage.getItem(`report-notes-${reportFilename}`)
-    return savedNotes && savedNotes.trim().length > 0
-  }
+  const hasNotes = (reportFilename) => notedFilenames.has(reportFilename)
 
   if (reports.length === 0) {
     return (

@@ -94,6 +94,9 @@ export default function LLMEvaluator({ password }) {
   const [running, setRunning] = useState(false)
   const [mcpServers, setMcpServers] = useState({})
   const [mcpNeeded, setMcpNeeded] = useState([])
+  const [notes, setNotes] = useState('')
+  const [notesSaved, setNotesSaved] = useState(true)
+  const [notesSaveError, setNotesSaveError] = useState('')
   const abortRef = useRef(null)
 
   const headers = { 'Content-Type': 'application/json', ...(password ? { 'x-app-password': password } : {}) }
@@ -106,7 +109,29 @@ export default function LLMEvaluator({ password }) {
       })
       .then(data => setMcpServers(data || {}))
       .catch(() => {})
+    fetch(`${API_URL}/api/llm-eval/notes`, { headers })
+      .then(r => r.json())
+      .then(data => { if (data.notes) setNotes(data.notes) })
+      .catch(() => {})
   }, [])
+
+  const saveNotes = async (value) => {
+    setNotesSaved(false)
+    setNotesSaveError('')
+    try {
+      const r = await fetch(`${API_URL}/api/llm-eval/notes`, {
+        method: 'POST', headers, body: JSON.stringify({ notes: value })
+      })
+      if (!r.ok) {
+        const text = await r.text()
+        setNotesSaveError(`Save failed (${r.status}): ${text.slice(0, 120)}`)
+      } else {
+        setNotesSaved(true)
+      }
+    } catch (err) {
+      setNotesSaveError(`Save failed: ${err.message}`)
+    }
+  }
 
   useEffect(() => {
     if (!prompt.trim()) { setMcpNeeded([]); return }
@@ -304,6 +329,23 @@ export default function LLMEvaluator({ password }) {
           })}
         </div>
       )}
+
+      {/* Evaluation Notes — saved on server */}
+      <div className="border border-gray-200 rounded-xl p-4 bg-gray-50">
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-sm font-semibold text-gray-700">Evaluation Notes</label>
+          <span className={`text-xs ${notesSaveError ? 'text-red-500' : notesSaved ? 'text-green-600' : 'text-amber-500'}`}>
+            {notesSaveError ? notesSaveError : notesSaved ? '✓ Saved on server' : 'Saving...'}
+          </span>
+        </div>
+        <textarea
+          value={notes}
+          onChange={e => { setNotes(e.target.value); setNotesSaved(false) }}
+          onBlur={e => saveNotes(e.target.value)}
+          placeholder="Write your evaluation notes here — which model performed best, why, tradeoffs observed... Saved on the server."
+          className="w-full h-32 px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y focus:ring-2 focus:ring-teal-400 focus:border-transparent bg-white"
+        />
+      </div>
     </div>
   )
 }
