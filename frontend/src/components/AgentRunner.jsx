@@ -33,6 +33,7 @@ function AgentRunner({ password, onClose }) {
     { name: 'icp-inspector', category: 'Business', displayName: 'ICP Inspector', description: 'Cross-check CRM companies (20–250 seats) with Gong calls and VoC; split by closed won/lost', lastRun: null },
     { name: 'feature-insights', category: 'Business', displayName: 'FY27 Feature Insights', description: 'Mine Slack, VoC, and Jira for OV/Officevibe feature requests and produce a prioritized FY27 ideas list', lastRun: null },
     { name: 'bi-weekly-team', category: 'Team', displayName: 'Bi-Weekly Team Meeting', description: 'Prepare a short agenda doc for the OV bi-weekly sync: attendance, business health, eng highlights, and discussion topics', requiresParam: 'manualSourcesFolder', lastRun: null },
+    { name: 'slack-community-digest', category: 'Prep', displayName: 'Slack Community Digest', description: 'Surface high-engagement threads from Lenny\'s, Rand, and WiP Slack communities', requiresParam: 'slackWorkspace', paramType: 'slackWorkspace', lastRun: null },
 
   ])
 
@@ -47,7 +48,8 @@ function AgentRunner({ password, onClose }) {
     folder: '',
     email: '',
     week: '',
-    feature: ''
+    feature: '',
+    slackWorkspace: 'all'
   })
   const [releases, setReleases] = useState({}) // config.releases for feature dropdown
   const [teamMembers, setTeamMembers] = useState([]) // team members for slack user analysis
@@ -514,6 +516,7 @@ function AgentRunner({ password, onClose }) {
                 {selectedAgentsRequiringParams.map(agent => (
                   <div key={agent.requiresParam} className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                     <label className="block text-sm font-medium text-gray-900 mb-1">
+                      {agent.paramType === 'slackWorkspace' && 'Slack Community Workspace'}
                       {agent.paramType === 'slackUserTeam' && 'Select Team Member'}
                       {agent.paramType === 'oneOnOne' && 'Select Person for 1-1'}
                       {agent.requiresParam === 'slackUserId' && !agent.paramType && 'Slack User ID'}
@@ -528,7 +531,19 @@ function AgentRunner({ password, onClose }) {
                     <div className="text-xs text-gray-600 mb-2">
                       Required for: {agent.displayName}
                     </div>
-                    {agent.requiresParam === 'feature' ? (
+                    {agent.paramType === 'slackWorkspace' ? (
+                      <select
+                        value={parameters.slackWorkspace}
+                        onChange={(e) => handleParameterChange('slackWorkspace', e.target.value)}
+                        disabled={isRunning}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white"
+                      >
+                        <option value="all">All Workspaces (Lenny's + Rand + WiP)</option>
+                        <option value="lennys">Lenny's Slack — Product strategy frameworks</option>
+                        <option value="rand">Rand's Community — SaaS leadership tips</option>
+                        <option value="wip">WiP (Women in Product) — Women leadership</option>
+                      </select>
+                    ) : agent.requiresParam === 'feature' ? (
                       <select
                         value={parameters.feature}
                         onChange={(e) => handleParameterChange('feature', e.target.value)}

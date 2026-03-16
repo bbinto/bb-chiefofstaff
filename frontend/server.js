@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { extractOneLineSummary, extractInsights } from '../src/utils/summary-extractor.js';
@@ -1127,6 +1128,18 @@ app.post('/api/run-agents', async (req, res) => {
         console.log('[Server] Adding feature parameter:', featureVal);
       }
     }
+    if (parameters?.slackWorkspace) {
+      args.push('--workspace', parameters.slackWorkspace);
+      console.log('[Server] Adding workspace parameter:', parameters.slackWorkspace);
+    }
+    if (parameters?.prompt) {
+      args.push('--prompt', parameters.prompt);
+      console.log('[Server] Adding prompt parameter:', parameters.prompt);
+    }
+    if (parameters?.mcps) {
+      args.push('--mcps', parameters.mcps);
+      console.log('[Server] Adding mcps parameter:', parameters.mcps);
+    }
 
     const commandStr = `node src/index.js ${args.join(' ')}`;
     console.log('Executing command:', commandStr);
@@ -1175,20 +1188,30 @@ app.post('/api/run-agents', async (req, res) => {
       startTime: new Date()
     });
 
-    // Capture stdout — echo to CLI and store for frontend
+    // Open a persistent log file for this execution
+    const logsDir = path.join(__dirname, '..', 'logs');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+    const agentSlug = expandedAgents.join('+').replace(/[^a-zA-Z0-9+\-_]/g, '_');
+    const logFilePath = path.join(logsDir, `agent-run-${executionId}-${agentSlug}.log`);
+    const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+    logStream.write(`=== Agent Run ===\nAgents: ${expandedAgents.join(', ')}\nStarted: ${new Date().toISOString()}\nPID: ${child.pid}\nCommand: ${commandStr}\n\n`);
+
+    // Capture stdout — echo to CLI, store for frontend, and persist to disk
     child.stdout.on('data', (data) => {
       const log = data.toString();
       process.stdout.write(log);
+      logStream.write(log);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stdout', message: log, timestamp: new Date() });
       }
     });
 
-    // Capture stderr — echo to CLI and store for frontend
+    // Capture stderr — echo to CLI, store for frontend, and persist to disk
     child.stderr.on('data', (data) => {
       const log = data.toString();
       process.stderr.write(log);
+      logStream.write(`[stderr] ${log}`);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stderr', message: log, timestamp: new Date() });
@@ -1204,6 +1227,8 @@ app.post('/api/run-agents', async (req, res) => {
         execution.exitCode = code;
         execution.endTime = new Date();
       }
+      logStream.write(`\n=== Finished: ${new Date().toISOString()} | exit code ${code} ===\n`);
+      logStream.end();
     });
 
     // Handle process errors
@@ -1215,6 +1240,8 @@ app.post('/api/run-agents', async (req, res) => {
         execution.error = error.message;
         execution.logs.push({ type: 'error', message: error.message, timestamp: new Date() });
       }
+      logStream.write(`\n=== Error: ${error.message} | ${new Date().toISOString()} ===\n`);
+      logStream.end();
     });
 
     // Send immediate response that execution has started
@@ -1500,6 +1527,47 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
     isOpen = false;
     clearInterval(interval);
   });
+});
+
+// Return list of configured MCP server names (filtered to those listed in config.json)
+app.get('/api/mcp-servers', (req, res) => {
+  try {
+    // Load the project config to get the allowed MCP list
+    const projectConfigPath = path.join(__dirname, '..', 'config.json');
+    const projectConfig = JSON.parse(fs.readFileSync(projectConfigPath, 'utf8'));
+    const allowedServers = [
+      ...(projectConfig.mcp?.work?.servers || []),
+      ...(projectConfig.mcp?.health?.servers || [])
+    ];
+
+    // Load the Claude Desktop config to get actual server details
+    const homeDir = os.homedir();
+    const candidates = [
+      process.env.MCP_CONFIG_PATH,
+      path.join(homeDir, '.config', 'claude', 'claude_desktop_config.json'),
+      path.join(homeDir, '.config', 'Claude', 'claude_desktop_config.json'),
+      path.join(homeDir, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+    ].filter(Boolean);
+
+    let desktopServers = {};
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        desktopServers = JSON.parse(fs.readFileSync(candidate, 'utf8')).mcpServers || {};
+        console.log(`[mcp-servers] Desktop config: ${Object.keys(desktopServers).length} servers; allowed by config.json: ${allowedServers.length}`);
+        break;
+      }
+    }
+
+    // Return only servers that are both in config.json and in the desktop config
+    const servers = allowedServers
+      .filter(name => desktopServers[name])
+      .map(name => ({ name, command: desktopServers[name].command, args: desktopServers[name].args || [] }));
+
+    res.json({ servers });
+  } catch (error) {
+    console.error('Error loading MCP servers:', error);
+    res.status(500).json({ error: 'Failed to load MCP servers', details: error.message });
+  }
 });
 
 // Check MCP connection status

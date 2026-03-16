@@ -454,6 +454,20 @@ export class AgentRunner {
         ? `\n\n**IMPORTANT: Slack User ID Parameter**\nThe Slack user ID to analyze is: ${p.slackUserId}\nPlease use this user ID to search for their messages and analyze their contributions.`
         : `\n\n**IMPORTANT: Slack User ID Parameter Required**\nNo Slack user ID was provided. Please ask the user for the Slack user ID before proceeding with the analysis. The Slack user ID format is typically "U" followed by alphanumeric characters (e.g., "U01234567AB").`,
 
+      'research-ask': () => {
+        if (!p.prompt) return '\n\n**IMPORTANT: Query Required**\nNo query was provided. Please specify a research query using the --prompt parameter.';
+        const mcpList = p.mcps ? `\n\nSelected MCP sources: ${p.mcps.split(',').map(s => s.trim()).join(', ')}\nUse ONLY these MCP servers for this research task.` : '';
+        return `\n\n**IMPORTANT: Research Query**\nThe user's query is:\n\n> ${p.prompt}\n\nFocus all your research and output on answering this query.${mcpList}`;
+      },
+
+      'slack-community-digest': () => {
+        const workspace = p.workspace || 'all';
+        const workspaceLabels = { lennys: "Lenny's Slack", rand: "Rand's Community (SparkToro)", wip: 'WiP (Women in Product)', all: 'all three workspaces (Lenny\'s, Rand, and WiP)' };
+        const label = workspaceLabels[workspace] || workspace;
+        const mcpMap = `\n\nMCP server mapping (CRITICAL — use the correct server for each community):\n- Lenny's Slack → \`Slack-Lenny\` MCP server\n- Rand's Community → \`Slack-Rand\` MCP server\n- WiP (Women in Product) → \`Slack-WiP\` MCP server\n\nDo NOT use the generic \`Slack\` server — it is the internal work Slack only.`;
+        return `\n\n**IMPORTANT: Workspace Parameter**\nThe workspace parameter is set to: \`${workspace}\`\nYou MUST process ${label}.\n${workspace === 'all' ? 'Process ALL THREE workspaces in order: Lenny\'s (Slack-Lenny), then Rand (Slack-Rand), then WiP (Slack-WiP). Do NOT skip any workspace.' : `Only process the ${label} workspace.`}${mcpMap}`;
+      },
+
       'business-health': () => p.manualSourcesFolder
         ? `\n\n**IMPORTANT: Manual Sources Folder Parameter**\nThe folder to use for manual sources is: "${p.manualSourcesFolder}"\nPlease use files from the "${p.manualSourcesFolder}" subfolder within manual_sources. When using the read_file_from_manual_sources tool, specify filenames relative to this folder (e.g., if folder is "Week 1" and file is "ARR OV.xlsx", use filename "ARR OV.xlsx" or "Week 1/ARR OV.xlsx").`
         : '',
@@ -1511,6 +1525,16 @@ ${(() => {
         return serverName.includes('mixpanel');
       });
       console.log(`[buildToolsSchema] Filtered tools for feature-telemetry-tracking: Mixpanel-only, ${filteredTools.length} tools available`);
+    }
+
+    // research-ask: filter to only the user-selected MCP servers
+    if (agentName === 'research-ask' && this.agentParams?.mcps) {
+      const selectedMcps = this.agentParams.mcps.split(',').map(s => s.trim().toLowerCase());
+      filteredTools = filteredTools.filter(tool => {
+        const server = (tool.server || '').toLowerCase();
+        return selectedMcps.some(selected => server.includes(selected) || selected.includes(server));
+      });
+      console.log(`[buildToolsSchema] Filtered tools for research-ask: selected MCPs (${selectedMcps.join(', ')}), ${filteredTools.length} tools available`);
     }
 
     // thoughtleadership-rss: RSS + Reddit + NYTimes only (keeps token count low)
