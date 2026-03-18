@@ -10,6 +10,10 @@ function MCPStatus({ password, onBack }) {
   const [refreshing, setRefreshing] = useState(false)
   const [clearingCache, setClearingCache] = useState(false)
   const [actionMessage, setActionMessage] = useState(null)
+  const [editMode, setEditMode] = useState(false)
+  const [configContent, setConfigContent] = useState('')
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configMessage, setConfigMessage] = useState(null)
 
   const checkMCPStatus = async () => {
     try {
@@ -212,6 +216,52 @@ function MCPStatus({ password, onBack }) {
     }
   }
 
+  const loadConfig = async () => {
+    setEditMode(true)
+    setConfigMessage(null)
+    setConfigContent('')
+    try {
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/mcp-config`, { headers })
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}))
+        throw new Error(errData.error || `HTTP ${response.status}`)
+      }
+      const data = await response.json()
+      setConfigContent(data.content)
+    } catch (err) {
+      setConfigMessage({ type: 'error', message: `✗ Failed to load config: ${err.message}` })
+    }
+  }
+
+  const saveConfig = async () => {
+    try {
+      JSON.parse(configContent)
+    } catch {
+      setConfigMessage({ type: 'error', message: '✗ Invalid JSON — fix before saving.' })
+      return
+    }
+    setConfigSaving(true)
+    setConfigMessage(null)
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(password ? { 'x-app-password': password } : {}) }
+      const response = await fetch(`${API_URL}/api/mcp-config`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ content: configContent })
+      })
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to save config')
+      }
+      setConfigMessage({ type: 'success', message: '✓ Config saved. Refresh MCP connections to apply.' })
+    } catch (err) {
+      setConfigMessage({ type: 'error', message: `✗ ${err.message}` })
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
   useEffect(() => {
     checkMCPStatus()
   }, [password])
@@ -324,6 +374,16 @@ function MCPStatus({ password, onBack }) {
             Clear Cache
           </button>
           <button
+            onClick={editMode ? () => setEditMode(false) : loadConfig}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            title="Edit claude_desktop_config.json"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            {editMode ? 'Hide Editor' : 'Edit Config'}
+          </button>
+          <button
             onClick={onBack}
             className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-[#00203F] transition-colors"
           >
@@ -351,6 +411,40 @@ function MCPStatus({ password, onBack }) {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Config Editor */}
+      {editMode && (
+        <div className="mb-8 border border-indigo-200 rounded-xl p-6 bg-indigo-50">
+          <h3 className="text-lg font-semibold text-[#00203F] mb-3">Edit claude_desktop_config.json</h3>
+          {configMessage && (
+            <div className={`mb-3 p-3 rounded-lg border text-sm ${configMessage.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+              {configMessage.message}
+            </div>
+          )}
+          <textarea
+            className="w-full h-96 font-mono text-sm border border-gray-300 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-gray-50"
+            value={configContent}
+            onChange={e => setConfigContent(e.target.value)}
+            spellCheck={false}
+          />
+          <div className="flex gap-3 mt-3">
+            <button
+              onClick={saveConfig}
+              disabled={configSaving}
+              className="flex items-center gap-2 px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+            >
+              {configSaving ? <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div> : null}
+              Save Config
+            </button>
+            <button
+              onClick={() => setEditMode(false)}
+              className="px-5 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
             </button>
           </div>
         </div>
@@ -521,6 +615,7 @@ function MCPStatus({ password, onBack }) {
           </div>
         )}
       </div>
+
     </div>
   )
 }

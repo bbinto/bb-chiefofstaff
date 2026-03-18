@@ -167,6 +167,17 @@ Use the **nytimes MCP** to fetch today's top articles. Configuration is provided
 - Do NOT include NYTimes articles in the New Topics, Trending Topics, or Industry Insights sections — keep them isolated in their own section
 - If the nytimes MCP is unavailable, note it explicitly and skip the section
 
+### 4b. The Atlantic Spotlight
+
+Use the **theatlantic MCP** to fetch today's top articles. Configuration is provided under "The Atlantic" in your configuration context.
+
+- Call the theatlantic MCP to fetch top articles
+- From the results, select the top **3 articles** most relevant to technology, AI, society, or culture
+- For each article include: title (linked), byline, publication date, abstract/summary
+- These articles must appear in the dedicated **The Atlantic Spotlight** section of the report — do NOT mix them into other sections
+- Do NOT include The Atlantic articles in the New Topics, Trending Topics, or Industry Insights sections — keep them isolated in their own section
+- If the theatlantic MCP is unavailable, note it explicitly and skip the section
+
 ### 5. Reddit Community Intelligence
 
 For each subreddit listed under "Reddit Sources" in your configuration context:
@@ -295,6 +306,14 @@ For each trending topic (bullet format — NO tables):
   - **Date**: [Publication date]
   - **Summary**: [Abstract in one sentence]
 
+### The Atlantic Spotlight
+(bullet format — top 3 articles from The Atlantic, filtered for tech/AI/society/culture relevance)
+
+- **[Article Title](article-url)**
+  - **By**: [Byline]
+  - **Date**: [Publication date]
+  - **Summary**: [Abstract in one sentence]
+
 ### Reddit Community Highlights
 (table format)
 
@@ -311,9 +330,11 @@ For each trending topic (bullet format — NO tables):
 - Strategic considerations: [List]
 
 ## Success Criteria
-- All configured data sources are checked, including Reddit subreddits via the reddit MCP and NYTimes via the nytimes MCP
+- All configured data sources are checked, including Reddit subreddits via the reddit MCP, NYTimes via the nytimes MCP, and The Atlantic via the theatlantic MCP
 - **NYTimes Tech & AI Spotlight** contains exactly 3 articles from the technology section, filtered for tech/AI relevance
 - NYTimes articles appear only in the NYTimes section — not duplicated in other sections
+- **The Atlantic Spotlight** contains exactly 3 articles, filtered for tech/AI/society/culture relevance
+- The Atlantic articles appear only in The Atlantic section — not duplicated in other sections
 - Top 3 posts fetched per configured subreddit using the reddit MCP
 - **No article, post, or URL appears more than once across all sections** — each entry used in exactly one section
 - **Every Reddit post includes a direct clickable link** to the specific Reddit post URL

@@ -34,6 +34,7 @@ function AgentRunner({ password, onClose }) {
     { name: 'feature-insights', category: 'Business', displayName: 'FY27 Feature Insights', description: 'Mine Slack, VoC, and Jira for OV/Officevibe feature requests and produce a prioritized FY27 ideas list', lastRun: null },
     { name: 'bi-weekly-team', category: 'Team', displayName: 'Bi-Weekly Team Meeting', description: 'Prepare a short agenda doc for the OV bi-weekly sync: attendance, business health, eng highlights, and discussion topics', requiresParam: 'manualSourcesFolder', lastRun: null },
     { name: 'slack-community-digest', category: 'Prep', displayName: 'Slack Community Digest', description: 'Surface high-engagement threads from Lenny\'s, Rand, and WiP Slack communities', requiresParam: 'slackWorkspace', paramType: 'slackWorkspace', lastRun: null },
+    { name: 'podcast-digest', category: 'Prep', displayName: 'Podcast Digest', description: 'Critical learning digest from podcast clip notes in OneNote → General section', lastRun: null },
 
   ])
 

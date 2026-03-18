@@ -1380,6 +1380,7 @@ Web Sources: ${(this.config.thoughtleadership?.webSources || []).join(', ') || '
 Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || []).join(', ') || 'None'}
 Reddit Sources (top ${this.config.thoughtleadership?.redditSources?.topPosts || 3} posts each): ${(this.config.thoughtleadership?.redditSources?.subreddits || []).map(s => `${s.name} (${s.reason})`).join(', ') || 'None'}
 NYTimes Tech & AI: Use the nytimes MCP to fetch the top ${this.config.thoughtleadership?.nyTimes?.topArticlesCount || 3} articles from the "${(this.config.thoughtleadership?.nyTimes?.sections || ['technology']).join('", "')}" section(s). Filter for articles related to: ${(this.config.thoughtleadership?.nyTimes?.filterTopics || []).join(', ')}.
+The Atlantic: Use the theatlantic MCP to fetch the top ${this.config.thoughtleadership?.theAtlantic?.topArticlesCount || 3} articles. Filter for articles related to: ${(this.config.thoughtleadership?.theAtlantic?.filterTopics || []).join(', ')}.
 **CRITICAL: ONLY use RSS feeds listed above. DO NOT search for or use any RSS feeds not explicitly listed here.**
 
 ## Releases
@@ -1537,13 +1538,13 @@ ${(() => {
       console.log(`[buildToolsSchema] Filtered tools for research-ask: selected MCPs (${selectedMcps.join(', ')}), ${filteredTools.length} tools available`);
     }
 
-    // thoughtleadership-rss: RSS + Reddit + NYTimes only (keeps token count low)
+    // thoughtleadership-rss: RSS + Reddit + NYTimes + The Atlantic only (keeps token count low)
     if (agentName === 'thoughtleadership-rss') {
       filteredTools = filteredTools.filter(tool => {
         const server = (tool.server || '').toLowerCase();
-        return server.includes('rss') || server.includes('reddit') || server.includes('nytimes');
+        return server.includes('rss') || server.includes('reddit') || server.includes('nytimes') || server.includes('theatlantic');
       });
-      console.log(`[buildToolsSchema] Filtered tools for thoughtleadership-rss: RSS/Reddit/NYTimes only, ${filteredTools.length} tools`);
+      console.log(`[buildToolsSchema] Filtered tools for thoughtleadership-rss: RSS/Reddit/NYTimes/TheAtlantic only, ${filteredTools.length} tools`);
     }
 
     // thoughtleadership-web: web browsing only (keeps token count low)
@@ -1557,7 +1558,7 @@ ${(() => {
 
     const mcpTools = filteredTools.map(tool => ({
       name: tool.name,
-      description: tool.schema.description || `Tool from ${tool.server} server`,
+      description: `[${tool.server}] ${tool.schema.description || `Tool from ${tool.server} server`}`,
       input_schema: tool.schema.inputSchema || {
         type: 'object',
         properties: {},

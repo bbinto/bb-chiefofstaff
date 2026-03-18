@@ -328,7 +328,8 @@ export class MCPClientManager {
           console.warn(`  ⚠️  Skipping invalid tool from ${serverName}: missing name property`);
           return;
         }
-        this.tools.set(tool.name, { serverName, client, schema: tool });
+        const prefixedName = `${serverName}__${tool.name}`;
+        this.tools.set(prefixedName, { serverName, client, schema: tool, originalName: tool.name });
         registeredCount++;
       } catch (error) {
         errors.push(`Tool registration error: ${error.message}`);
@@ -397,7 +398,7 @@ export class MCPClientManager {
         try {
           // Use rate limiter to wrap the tool call
           const result = await this.mixpanelRateLimiter.withRateLimit(
-            () => client.callTool({ name: toolName, arguments: args }),
+            () => client.callTool({ name: toolInfo.originalName, arguments: args }),
             toolName
           );
 
@@ -430,7 +431,7 @@ export class MCPClientManager {
       throw lastError || new Error(`Failed to call ${toolName} after ${MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS} attempts`);
     } else {
       // For non-Mixpanel tools, call directly without rate limiting
-      const result = await client.callTool({ name: toolName, arguments: args });
+      const result = await client.callTool({ name: toolInfo.originalName, arguments: args });
 
       // Log results for Jira tools
       if (this.isJiraTool(toolName, toolInfo.serverName)) {

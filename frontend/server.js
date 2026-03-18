@@ -1788,6 +1788,49 @@ app.post('/api/mcp-clear-cache', async (req, res) => {
   }
 });
 
+// ─── MCP Config Editor ────────────────────────────────────────────────────────
+
+const MCP_CONFIG_PATH = path.join(os.homedir(), '.config', 'claude', 'claude_desktop_config.json');
+
+// Get the claude_desktop_config.json contents
+app.get('/api/mcp-config', (req, res) => {
+  try {
+    if (!fs.existsSync(MCP_CONFIG_PATH)) {
+      return res.status(404).json({ error: 'Config file not found', path: MCP_CONFIG_PATH });
+    }
+    const raw = fs.readFileSync(MCP_CONFIG_PATH, 'utf8');
+    res.json({ content: raw, path: MCP_CONFIG_PATH });
+  } catch (error) {
+    console.error('Error reading MCP config:', error);
+    res.status(500).json({ error: 'Failed to read config file', details: error.message });
+  }
+});
+
+// Save the claude_desktop_config.json contents
+app.put('/api/mcp-config', (req, res) => {
+  try {
+    const { content } = req.body;
+    if (typeof content !== 'string') {
+      return res.status(400).json({ error: 'content must be a string' });
+    }
+    // Validate JSON before saving
+    JSON.parse(content);
+    // Write a backup first
+    const backupPath = MCP_CONFIG_PATH + '.bak';
+    if (fs.existsSync(MCP_CONFIG_PATH)) {
+      fs.copyFileSync(MCP_CONFIG_PATH, backupPath);
+    }
+    fs.writeFileSync(MCP_CONFIG_PATH, content, 'utf8');
+    res.json({ success: true, message: 'Config saved successfully', path: MCP_CONFIG_PATH });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return res.status(400).json({ error: 'Invalid JSON', details: error.message });
+    }
+    console.error('Error saving MCP config:', error);
+    res.status(500).json({ error: 'Failed to save config file', details: error.message });
+  }
+});
+
 // ─── Manual Sources Upload ────────────────────────────────────────────────────
 
 const MANUAL_SOURCES_DIR = path.join(__dirname, '..', 'manual_sources');
