@@ -1547,6 +1547,15 @@ ${(() => {
       console.log(`[buildToolsSchema] Filtered tools for thoughtleadership-rss: RSS/Reddit/NYTimes/TheAtlantic only, ${filteredTools.length} tools`);
     }
 
+    // edge-intel: RSS + NYTimes only (no web browsing, no Reddit — speed-optimised)
+    if (agentName === 'edge-intel') {
+      filteredTools = filteredTools.filter(tool => {
+        const server = (tool.server || '').toLowerCase();
+        return server.includes('rss') || server.includes('nytimes');
+      });
+      console.log(`[buildToolsSchema] Filtered tools for edge-intel: RSS/NYTimes only, ${filteredTools.length} tools`);
+    }
+
     // thoughtleadership-web: web browsing only (keeps token count low)
     if (agentName === 'thoughtleadership-web') {
       filteredTools = filteredTools.filter(tool => {

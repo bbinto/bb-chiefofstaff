@@ -24,6 +24,7 @@ function AgentRunner({ password, onClose }) {
     { name: 'performance-review-q3', category: 'Team', displayName: 'Q3 Performance Review (WL)', description: 'Generate Q3 performance review using Workleap questionnaire format', requiresParam: 'email', lastRun: null },
     { name: 'performance-review-q4', category: 'Team', displayName: 'Q4 Performance Review (WL)', description: 'Generate Q4 performance review: strengths, improvement areas, and overall rating based on impact and contributions', requiresParam: 'email', paramType: 'teamMemberEmail', lastRun: null },
     { name: 'thoughtleadership-updates', category: 'Prep', displayName: 'Thought Leadership', description: 'Product thought leadership and new topics', lastRun: null },
+    { name: 'edge-intel', category: 'Prep', displayName: 'Edge Intel', description: 'Provocative & contrarian: newest ideas, controversial takes, original findings only', lastRun: null },
     { name: 'strategy-roadmap', category: 'Business', displayName: 'Strategy Roadmap', description: 'Strategy roadmap', lastRun: null },
     { name: 'slack-user-analysis', category: 'Team', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', paramType: 'slackUserTeam', lastRun: null },
     { name: '1-1', category: 'Team', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', paramType: 'oneOnOne', lastRun: null },
