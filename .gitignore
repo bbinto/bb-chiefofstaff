@@ -76,3 +76,8 @@ llm-eval-notes.json
 report-notes.json
 frontend/vite.config.js
 config.backup.*.json
+frontend/vite.config.js
+agents/good-vibes-recognition.md
+agents/weekly-recap.md
+agents/good-vibes-recognition.md
+agents/business-health.md

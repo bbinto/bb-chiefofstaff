@@ -96,6 +96,41 @@ export class AgentRunner {
     return fs.readFileSync(agentPath, 'utf8');
   }
 
+  /**
+   * Parse the ## MCPs section from an agent markdown file.
+   * Returns:
+   *   - string[]       if MCPs are listed (e.g. ["Slack", "Jira"])
+   *   - []             if section exists but says "none"
+   *   - 'user-selected' if section says "user-selected" (research-ask style)
+   *   - null           if no ## MCPs section found (legacy fallback)
+   */
+  loadAgentMCPs(agentName) {
+    const agentPath = path.join(process.cwd(), PATHS.AGENTS_DIR, `${agentName}.md`);
+    if (!fs.existsSync(agentPath)) return null;
+
+    const content = fs.readFileSync(agentPath, 'utf8');
+    const lines = content.split('\n');
+
+    // Find the "## MCPs" heading (allow optional leading whitespace)
+    const mcpIdx = lines.findIndex(l => /^[ \t]*## MCPs[ \t]*$/.test(l));
+    if (mcpIdx === -1) return null;
+
+    // Collect body lines until the next heading
+    const bodyLines = [];
+    for (let i = mcpIdx + 1; i < lines.length; i++) {
+      if (/^[ \t]*#{1,6} /.test(lines[i])) break;
+      bodyLines.push(lines[i]);
+    }
+
+    const body = bodyLines.join('\n').trim();
+    if (!body || body.toLowerCase() === 'none') return [];
+    if (body.toLowerCase().startsWith('user-selected')) return 'user-selected';
+
+    return bodyLines
+      .map(line => line.replace(/^[ \t]*[-*]\s*/, '').trim())
+      .filter(line => line.length > 0 && !line.startsWith('#'));
+  }
+
 
   /**
    * Convert Anthropic format to OpenAI format for Ollama.
@@ -460,14 +495,6 @@ export class AgentRunner {
         return `\n\n**IMPORTANT: Research Query**\nThe user's query is:\n\n> ${p.prompt}\n\nFocus all your research and output on answering this query.${mcpList}`;
       },
 
-      'slack-community-digest': () => {
-        const workspace = p.workspace || 'all';
-        const workspaceLabels = { lennys: "Lenny's Slack", rand: "Rand's Community (SparkToro)", wip: 'WiP (Women in Product)', all: 'all three workspaces (Lenny\'s, Rand, and WiP)' };
-        const label = workspaceLabels[workspace] || workspace;
-        const mcpMap = `\n\nMCP server mapping (CRITICAL — use the correct server for each community):\n- Lenny's Slack → \`Slack-Lenny\` MCP server\n- Rand's Community → \`Slack-Rand\` MCP server\n- WiP (Women in Product) → \`Slack-WiP\` MCP server\n\nDo NOT use the generic \`Slack\` server — it is the internal work Slack only.`;
-        return `\n\n**IMPORTANT: Workspace Parameter**\nThe workspace parameter is set to: \`${workspace}\`\nYou MUST process ${label}.\n${workspace === 'all' ? 'Process ALL THREE workspaces in order: Lenny\'s (Slack-Lenny), then Rand (Slack-Rand), then WiP (Slack-WiP). Do NOT skip any workspace.' : `Only process the ${label} workspace.`}${mcpMap}`;
-      },
-
       'business-health': () => p.manualSourcesFolder
         ? `\n\n**IMPORTANT: Manual Sources Folder Parameter**\nThe folder to use for manual sources is: "${p.manualSourcesFolder}"\nPlease use files from the "${p.manualSourcesFolder}" subfolder within manual_sources. When using the read_file_from_manual_sources tool, specify filenames relative to this folder (e.g., if folder is "Week 1" and file is "ARR OV.xlsx", use filename "ARR OV.xlsx" or "Week 1/ARR OV.xlsx").`
         : '',
@@ -632,6 +659,18 @@ export class AgentRunner {
         content: `${instructions}${parameterMessage}\n\nPlease execute the agent's instructions now. Use the available MCP tools to gather the required data and provide a comprehensive report following the output format specified in the instructions.`
       }
     ];
+
+    // Lazily connect only the MCPs this agent needs, then build its tool schema
+    const agentMCPs = this.loadAgentMCPs(agentName);
+    let mcpsToConnect;
+    if (agentMCPs === 'user-selected') {
+      mcpsToConnect = this.agentParams?.mcps
+        ? this.agentParams.mcps.split(',').map(s => s.trim())
+        : null; // no param → connect all (legacy behaviour)
+    } else {
+      mcpsToConnect = agentMCPs; // null (all), [] (none), or string[]
+    }
+    await this.mcpClient.initializeForServers(mcpsToConnect);
 
     // Get available tools from MCP (filtered by agent type)
     let tools = this.buildToolsSchema(agentName);
@@ -1428,141 +1467,68 @@ ${(() => {
 
   /**
    * Build tools schema for Claude from MCP tools + custom filesystem tools
-   * Filters tools based on agent type to reduce token overhead
+   * Filters tools based on agent-level ## MCPs configuration in the agent markdown file.
+   * Falls back to legacy hardcoded filtering for agents without an ## MCPs section.
    */
   buildToolsSchema(agentName) {
     const availableTools = this.mcpClient.getAvailableTools();
+    const agentMCPs = this.loadAgentMCPs(agentName);
 
-    // Define health agents (only use health MCPs)
-    const healthAgents = ['mydailyhealth'];
-    
-    // Define agents that should include health MCPs (for health check-ins)
-    const agentsWithHealthMCPs = ['daily-brief'];
-    
-    // Get MCP configuration from config
-    const mcpConfig = this.config?.mcp || {};
-    const healthServers = mcpConfig.health?.servers || [];
-    const workServers = mcpConfig.work?.servers || [];
+    let filteredTools;
 
-    let filteredTools = availableTools;
-
-    // For health agents, only include health MCP servers
-    if (healthAgents.includes(agentName)) {
-      // First, log all available MCP servers for debugging
-      const allServers = [...new Set(availableTools.map(t => t.server))];
-      console.log(`[buildToolsSchema] All available MCP servers: ${allServers.join(', ')}`);
-      
-      // Normalize configured health server names for matching
-      const normalizedHealthServers = healthServers.map(s => this.normalizeServerName(s));
-      
-      // Filter to only include tools from health MCP servers
-      // Use flexible matching with normalization
-      filteredTools = availableTools.filter(tool => {
-        const normalizedServerName = this.normalizeServerName(tool.server);
-        return normalizedHealthServers.some(normalizedHealthServer => {
-          // Check if normalized server name contains the health server keyword, or vice versa
-          return normalizedServerName.includes(normalizedHealthServer) || 
-                 normalizedHealthServer.includes(normalizedServerName) ||
-                 // Also check original names for exact matches
-                 tool.server.toLowerCase().includes(normalizedHealthServer) ||
-                 normalizedHealthServer.includes(tool.server.toLowerCase());
+    if (agentMCPs !== null) {
+      // --- Per-agent MCP config path ---
+      if (agentMCPs === 'user-selected') {
+        // research-ask style: MCPs passed as a runtime param
+        if (this.agentParams?.mcps) {
+          const selectedMcps = this.agentParams.mcps.split(',').map(s => s.trim().toLowerCase());
+          filteredTools = availableTools.filter(tool => {
+            const server = (tool.server || '').toLowerCase();
+            return selectedMcps.some(sel => server.includes(sel) || sel.includes(server));
+          });
+          console.log(`[buildToolsSchema] User-selected MCPs for ${agentName}: [${selectedMcps.join(', ')}], ${filteredTools.length} tools`);
+        } else {
+          filteredTools = availableTools;
+          console.log(`[buildToolsSchema] User-selected MCPs for ${agentName}: no param provided, all ${filteredTools.length} tools included`);
+        }
+      } else if (agentMCPs.length === 0) {
+        // No MCPs needed — only custom filesystem tools
+        filteredTools = [];
+        console.log(`[buildToolsSchema] No MCPs configured for ${agentName}, using custom tools only`);
+      } else {
+        // Filter to exactly the listed MCPs using flexible name matching
+        filteredTools = availableTools.filter(tool => {
+          const normalizedServer = this.normalizeServerName(tool.server);
+          return agentMCPs.some(mcp => {
+            const normalizedMcp = this.normalizeServerName(mcp);
+            return normalizedServer.includes(normalizedMcp) || normalizedMcp.includes(normalizedServer);
+          });
         });
-      });
-      
-      // Log which servers matched
-      const matchedServers = [...new Set(filteredTools.map(t => t.server))];
-      const unmatchedHealthServers = healthServers.filter(healthServer => {
-        const normalized = this.normalizeServerName(healthServer);
-        return !matchedServers.some(server => {
-          const normalizedServer = this.normalizeServerName(server);
-          return normalizedServer.includes(normalized) || normalized.includes(normalizedServer);
+        const matchedServers = [...new Set(filteredTools.map(t => t.server))];
+        const unmatchedMCPs = agentMCPs.filter(mcp => {
+          const normalizedMcp = this.normalizeServerName(mcp);
+          return !matchedServers.some(s => {
+            const ns = this.normalizeServerName(s);
+            return ns.includes(normalizedMcp) || normalizedMcp.includes(ns);
+          });
         });
-      });
-      
-      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: ${healthServers.length} configured health MCP servers (${healthServers.join(', ')}), ${matchedServers.length} matched servers (${matchedServers.join(', ')}), ${filteredTools.length} tools available`);
-      if (unmatchedHealthServers.length > 0) {
-        console.warn(`[buildToolsSchema] ⚠️  Health MCP servers configured but not found/connected: ${unmatchedHealthServers.join(', ')}`);
-        console.warn(`[buildToolsSchema] ⚠️  Please verify these servers are configured in Claude Desktop and connected successfully`);
+        console.log(`[buildToolsSchema] Configured MCPs for ${agentName}: [${agentMCPs.join(', ')}], matched: [${matchedServers.join(', ')}], ${filteredTools.length} tools`);
+        if (unmatchedMCPs.length > 0) {
+          console.warn(`[buildToolsSchema] ⚠️  MCPs configured but not found/connected for ${agentName}: ${unmatchedMCPs.join(', ')}`);
+        }
       }
-    } else if (agentsWithHealthMCPs.includes(agentName)) {
-      // For agents that need health MCPs (like daily-brief), include all tools (work + health)
-      // Don't filter out health MCP servers - these agents need both work and health tools
-      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: including health MCPs (${healthServers.join(', ')}) for health check-in, ${filteredTools.length} tools available`);
     } else {
-      // For other work agents, exclude health MCP servers
+      // --- Legacy fallback: no ## MCPs section in agent file ---
+      const mcpConfig = this.config?.mcp || {};
+      const healthServers = mcpConfig.health?.servers || [];
+
       filteredTools = availableTools.filter(tool => {
         const serverName = tool.server.toLowerCase();
-        return !healthServers.some(healthServer => 
+        return !healthServers.some(healthServer =>
           serverName.includes(healthServer.toLowerCase())
         );
       });
-      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: excluded health MCPs (${healthServers.join(', ')}), ${filteredTools.length} tools available`);
-    }
-
-    // For mixpanel-query agent, ONLY include Mixpanel MCP tools to avoid 200k+ token prompt
-    if (agentName === 'mixpanel-query') {
-      const beforeCount = filteredTools.length;
-      filteredTools = filteredTools.filter(tool => {
-        const server = (tool.server || '').toLowerCase();
-        return server.includes('mixpanel');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for mixpanel-query: Mixpanel-only, ${filteredTools.length}/${beforeCount} tools (reduces prompt size significantly)`);
-    }
-
-    // For specific-network-telemetry agent, only include Mixpanel tools
-    // This agent focuses exclusively on querying Mixpanel Insights reports
-    if (agentName === 'specific-network-telemetry') {
-      filteredTools = filteredTools.filter(tool => {
-        const serverName = tool.server.toLowerCase();
-        return serverName.includes('mixpanel');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for specific-network-telemetry: Mixpanel-only, ${filteredTools.length} tools available`);
-    }
-
-    // For feature-telemetry-tracking agent, only include Mixpanel tools
-    if (agentName === 'feature-telemetry-tracking') {
-      filteredTools = filteredTools.filter(tool => {
-        const serverName = (tool.server || '').toLowerCase();
-        return serverName.includes('mixpanel');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for feature-telemetry-tracking: Mixpanel-only, ${filteredTools.length} tools available`);
-    }
-
-    // research-ask: filter to only the user-selected MCP servers
-    if (agentName === 'research-ask' && this.agentParams?.mcps) {
-      const selectedMcps = this.agentParams.mcps.split(',').map(s => s.trim().toLowerCase());
-      filteredTools = filteredTools.filter(tool => {
-        const server = (tool.server || '').toLowerCase();
-        return selectedMcps.some(selected => server.includes(selected) || selected.includes(server));
-      });
-      console.log(`[buildToolsSchema] Filtered tools for research-ask: selected MCPs (${selectedMcps.join(', ')}), ${filteredTools.length} tools available`);
-    }
-
-    // thoughtleadership-rss: RSS + Reddit + NYTimes + The Atlantic only (keeps token count low)
-    if (agentName === 'thoughtleadership-rss') {
-      filteredTools = filteredTools.filter(tool => {
-        const server = (tool.server || '').toLowerCase();
-        return server.includes('rss') || server.includes('reddit') || server.includes('nytimes') || server.includes('theatlantic');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for thoughtleadership-rss: RSS/Reddit/NYTimes/TheAtlantic only, ${filteredTools.length} tools`);
-    }
-
-    // edge-intel: RSS + NYTimes only (no web browsing, no Reddit — speed-optimised)
-    if (agentName === 'edge-intel') {
-      filteredTools = filteredTools.filter(tool => {
-        const server = (tool.server || '').toLowerCase();
-        return server.includes('rss') || server.includes('nytimes');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for edge-intel: RSS/NYTimes only, ${filteredTools.length} tools`);
-    }
-
-    // thoughtleadership-web: web browsing only (keeps token count low)
-    if (agentName === 'thoughtleadership-web') {
-      filteredTools = filteredTools.filter(tool => {
-        const server = (tool.server || '').toLowerCase();
-        return server.includes('read-website') || server.includes('website') || server.includes('browser') || server.includes('fetch');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for thoughtleadership-web: web browsing only, ${filteredTools.length} tools`);
+      console.log(`[buildToolsSchema] Legacy filter for ${agentName}: excluded health MCPs (${healthServers.join(', ')}), ${filteredTools.length} tools available`);
     }
 
     const mcpTools = filteredTools.map(tool => ({

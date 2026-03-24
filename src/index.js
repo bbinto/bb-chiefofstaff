@@ -90,10 +90,9 @@ class ChiefOfStaffAgent {
     validateEnvironment();
     this.loadConfig();
 
-    // Initialize MCP client
-    console.log('Initializing MCP client...');
+    // Create MCP client — connections are established lazily per-agent
+    console.log('Initializing MCP client (lazy mode — servers connect on demand)...');
     this.mcpClient = new MCPClientManager(this.config);
-    await this.mcpClient.initialize();
 
     // Initialize agent runner
     console.log('[ChiefOfStaffAgent] Initializing AgentRunner with agentParams:', this.agentParams);
