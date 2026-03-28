@@ -24,6 +24,7 @@ export const OLLAMA_CLOUD_MODELS = [
   { value: 'glm-5:cloud',                 label: 'GLM-5',                  tag: 'General purpose' },
   { value: 'qwen3.5:397b-cloud',          label: 'Qwen3.5 397B',           tag: 'High quality' },
   { value: 'nemotron-3-super:cloud',      label: 'Nemotron 3 Super',       tag: 'High quality' },
+  { value: 'minimax-m2.7:cloud',          label: 'MiniMax M2.7',           tag: 'General purpose' },
 ]
 
 export const OLLAMA_LOCAL_MODELS = [
