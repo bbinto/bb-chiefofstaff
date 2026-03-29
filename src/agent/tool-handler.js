@@ -90,6 +90,25 @@ export class ToolHandler {
           properties: {},
           required: []
         }
+      },
+      {
+        name: 'list_recent_reports_by_prefix',
+        description:
+          'List recent report files in the reports directory that match a given filename prefix, up to a specified number of days back. Use this to find previous thoughtleadership-updates or other agent reports for deduplication. Returns filenames sorted newest-first.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            prefix: {
+              type: 'string',
+              description: 'Filename prefix to filter by, e.g. "thoughtleadership-updates"'
+            },
+            days_back: {
+              type: 'number',
+              description: 'How many days back to look. Defaults to 30 if not specified.'
+            }
+          },
+          required: ['prefix']
+        }
       }
     );
 
@@ -117,6 +136,10 @@ export class ToolHandler {
 
     if (toolName === 'read_report_file') {
       return this.readReportFile(args);
+    }
+
+    if (toolName === 'list_recent_reports_by_prefix') {
+      return this.listRecentReportsByPrefix(args);
     }
 
     if (toolName === 'get_current_time') {
@@ -484,6 +507,52 @@ export class ToolHandler {
       dateRange: `${dateRange.startDate} to ${dateRange.endDate}`,
       reports: reportFiles,
       totalReports: reportFiles.length
+    };
+  }
+
+  /**
+   * List recent report files matching a filename prefix
+   * @param {object} args - { prefix, days_back }
+   * @returns {object} List of matching report filenames sorted newest-first
+   */
+  listRecentReportsByPrefix(args) {
+    const reportsPath = path.resolve(process.cwd(), PATHS.REPORTS_DIR);
+
+    if (!fs.existsSync(reportsPath)) {
+      return { error: 'reports folder does not exist', path: reportsPath };
+    }
+
+    const prefix = args.prefix || '';
+    const daysBack = args.days_back != null ? args.days_back : 30;
+
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+    const cutoffStr = cutoffDate.toISOString().slice(0, 10); // YYYY-MM-DD
+
+    const files = fs.readdirSync(reportsPath);
+    const matched = [];
+
+    for (const file of files) {
+      if (!file.endsWith('.md')) continue;
+      if (prefix && !file.startsWith(prefix)) continue;
+
+      const dateMatch = file.match(/(\d{4}-\d{2}-\d{2})/);
+      if (!dateMatch) continue;
+
+      const fileDate = dateMatch[1];
+      if (fileDate < cutoffStr) continue;
+
+      matched.push({ filename: file, date: fileDate });
+    }
+
+    matched.sort((a, b) => b.filename.localeCompare(a.filename));
+
+    return {
+      prefix,
+      days_back: daysBack,
+      cutoff_date: cutoffStr,
+      reports: matched,
+      total: matched.length
     };
   }
 

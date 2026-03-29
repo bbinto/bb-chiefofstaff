@@ -96,6 +96,41 @@ export class AgentRunner {
     return fs.readFileSync(agentPath, 'utf8');
   }
 
+  /**
+   * Parse the ## MCPs section from an agent markdown file.
+   * Returns:
+   *   - string[]       if MCPs are listed (e.g. ["Slack", "Jira"])
+   *   - []             if section exists but says "none"
+   *   - 'user-selected' if section says "user-selected" (research-ask style)
+   *   - null           if no ## MCPs section found (legacy fallback)
+   */
+  loadAgentMCPs(agentName) {
+    const agentPath = path.join(process.cwd(), PATHS.AGENTS_DIR, `${agentName}.md`);
+    if (!fs.existsSync(agentPath)) return null;
+
+    const content = fs.readFileSync(agentPath, 'utf8');
+    const lines = content.split('\n');
+
+    // Find the "## MCPs" heading (allow optional leading whitespace)
+    const mcpIdx = lines.findIndex(l => /^[ \t]*## MCPs[ \t]*$/.test(l));
+    if (mcpIdx === -1) return null;
+
+    // Collect body lines until the next heading
+    const bodyLines = [];
+    for (let i = mcpIdx + 1; i < lines.length; i++) {
+      if (/^[ \t]*#{1,6} /.test(lines[i])) break;
+      bodyLines.push(lines[i]);
+    }
+
+    const body = bodyLines.join('\n').trim();
+    if (!body || body.toLowerCase() === 'none') return [];
+    if (body.toLowerCase().startsWith('user-selected')) return 'user-selected';
+
+    return bodyLines
+      .map(line => line.replace(/^[ \t]*[-*]\s*/, '').trim())
+      .filter(line => line.length > 0 && !line.startsWith('#'));
+  }
+
 
   /**
    * Convert Anthropic format to OpenAI format for Ollama.
@@ -235,9 +270,26 @@ export class AgentRunner {
     const content = [];
     let stopReason = 'end_turn';
 
-    if (openaiResponse.choices && openaiResponse.choices[0]) {
+    // If Gemini returns no choices at all (empty array or missing), it rejected the prompt outright
+    if (!openaiResponse.choices || openaiResponse.choices.length === 0) {
+      const promptFeedback = openaiResponse.promptFeedback || openaiResponse.prompt_feedback;
+      const blockReason = promptFeedback?.blockReason || promptFeedback?.block_reason || 'unknown';
+      throw new Error(`Gemini returned no choices (prompt rejected before generation). Block reason: ${blockReason}. This often happens when the system prompt or tool list triggers Gemini's safety filters. Consider using Claude for tool-heavy agents.`);
+    }
+
+    if (openaiResponse.choices[0]) {
       const choice = openaiResponse.choices[0];
       const message = choice.message;
+      const finishReason = choice.finish_reason;
+
+      // Detect Gemini safety/recitation blocks — these return null content and a blocked finish_reason
+      const blockedReasons = ['recitation', 'content_filter', 'safety'];
+      if (blockedReasons.includes(finishReason)) {
+        const readable = finishReason === 'recitation'
+          ? 'RECITATION (Gemini refused to reproduce web/RSS article content — use Claude for agents that fetch external content)'
+          : `${finishReason.toUpperCase()} (Gemini safety filter blocked the response)`;
+        throw new Error(`Gemini blocked the response: ${readable}`);
+      }
 
       // Plain text content
       if (message?.content) {
@@ -245,7 +297,7 @@ export class AgentRunner {
       }
 
       // Tool calls → Anthropic tool_use blocks
-      if (choice.finish_reason === 'tool_calls' && message?.tool_calls?.length > 0) {
+      if (finishReason === 'tool_calls' && message?.tool_calls?.length > 0) {
         for (const tc of message.tool_calls) {
           let input = {};
           try { input = JSON.parse(tc.function.arguments); } catch { input = { _raw: tc.function.arguments }; }
@@ -253,7 +305,12 @@ export class AgentRunner {
         }
         stopReason = 'tool_use';
       } else {
-        stopReason = choice.finish_reason === 'stop' ? 'end_turn' : (choice.finish_reason || 'end_turn');
+        stopReason = finishReason === 'stop' ? 'end_turn' : (finishReason || 'end_turn');
+      }
+
+      // If Gemini returned stop but no content and no tool calls, surface it rather than silently saving a blank report
+      if (content.length === 0 && stopReason === 'end_turn') {
+        throw new Error('Gemini returned an empty response with no content and no tool calls. The model may have hit its output limit or been blocked by a filter.');
       }
     }
 
@@ -298,6 +355,17 @@ export class AgentRunner {
     if (!response.ok) {
       const errMsg = data?.error?.message || data?.error || responseText.slice(0, 300);
       throw new Error(`Gemini API error (${response.status}): ${errMsg}`);
+    }
+
+    // Log response summary for debugging empty/blocked responses
+    const choice0 = data?.choices?.[0];
+    const finishReason = choice0?.finish_reason;
+    const outputTokens = data?.usage?.completion_tokens ?? 0;
+    if (outputTokens === 0 || !choice0?.message?.content) {
+      console.warn(`⚠️  Gemini suspicious response: finish_reason=${JSON.stringify(finishReason)}, outputTokens=${outputTokens}, content=${JSON.stringify(choice0?.message?.content)?.slice(0, 100)}, choices.length=${data?.choices?.length ?? 0}`);
+      if (data?.promptFeedback || data?.prompt_feedback) {
+        console.warn(`⚠️  Gemini promptFeedback:`, JSON.stringify(data.promptFeedback || data.prompt_feedback));
+      }
     }
 
     return data;
@@ -420,6 +488,12 @@ export class AgentRunner {
       'slack-user-analysis': () => p.slackUserId
         ? `\n\n**IMPORTANT: Slack User ID Parameter**\nThe Slack user ID to analyze is: ${p.slackUserId}\nPlease use this user ID to search for their messages and analyze their contributions.`
         : `\n\n**IMPORTANT: Slack User ID Parameter Required**\nNo Slack user ID was provided. Please ask the user for the Slack user ID before proceeding with the analysis. The Slack user ID format is typically "U" followed by alphanumeric characters (e.g., "U01234567AB").`,
+
+      'research-ask': () => {
+        if (!p.prompt) return '\n\n**IMPORTANT: Query Required**\nNo query was provided. Please specify a research query using the --prompt parameter.';
+        const mcpList = p.mcps ? `\n\nSelected MCP sources: ${p.mcps.split(',').map(s => s.trim()).join(', ')}\nUse ONLY these MCP servers for this research task.` : '';
+        return `\n\n**IMPORTANT: Research Query**\nThe user's query is:\n\n> ${p.prompt}\n\nFocus all your research and output on answering this query.${mcpList}`;
+      },
 
       'business-health': () => p.manualSourcesFolder
         ? `\n\n**IMPORTANT: Manual Sources Folder Parameter**\nThe folder to use for manual sources is: "${p.manualSourcesFolder}"\nPlease use files from the "${p.manualSourcesFolder}" subfolder within manual_sources. When using the read_file_from_manual_sources tool, specify filenames relative to this folder (e.g., if folder is "Week 1" and file is "ARR OV.xlsx", use filename "ARR OV.xlsx" or "Week 1/ARR OV.xlsx").`
@@ -586,8 +660,45 @@ export class AgentRunner {
       }
     ];
 
+    // Lazily connect only the MCPs this agent needs, then build its tool schema
+    const agentMCPs = this.loadAgentMCPs(agentName);
+    let mcpsToConnect;
+    if (agentMCPs === 'user-selected') {
+      mcpsToConnect = this.agentParams?.mcps
+        ? this.agentParams.mcps.split(',').map(s => s.trim())
+        : null; // no param → connect all (legacy behaviour)
+    } else {
+      mcpsToConnect = agentMCPs; // null (all), [] (none), or string[]
+    }
+    await this.mcpClient.initializeForServers(mcpsToConnect);
+
     // Get available tools from MCP (filtered by agent type)
-    const tools = this.buildToolsSchema(agentName);
+    let tools = this.buildToolsSchema(agentName);
+
+    // Gemini silently returns empty responses when given too many tools.
+    // Cap using config limit and honour priorityServers ordering.
+    if (this.useGemini) {
+      const geminiConfig = this.config?.gemini || {};
+      const maxTools = geminiConfig.maxTools ?? 20;
+      const priorityServers = (geminiConfig.priorityServers || []).map(s => s.toLowerCase());
+
+      if (tools.length > maxTools) {
+        // Sort: priority-server tools first, then the rest (preserve relative order within each group)
+        if (priorityServers.length > 0) {
+          const isPriority = t => priorityServers.some(p => (t._server || t.name || '').toLowerCase().includes(p));
+          const priority = tools.filter(t => isPriority(t));
+          const rest = tools.filter(t => !isPriority(t));
+          tools = [...priority, ...rest];
+        }
+        console.warn(`⚠️  Gemini tool limit: capping ${tools.length} tools to ${maxTools}. Priority servers: [${priorityServers.join(', ')}]. Keeping: ${tools.slice(0, maxTools).map(t => t.name).join(', ')}`);
+        tools = tools.slice(0, maxTools);
+      }
+      // Strip internal _server field before sending to API
+      tools = tools.map(({ _server, ...t }) => t);
+    } else {
+      // Strip _server for non-Gemini paths too
+      tools = tools.map(({ _server, ...t }) => t);
+    }
 
     // Debug: Log tool names being sent to Claude
     console.log(`\n🔧 Tools available to ${agentName}:`, tools.map(t => t.name).slice(0, 10).join(', '), tools.length > 10 ? `... and ${tools.length - 10} more` : '');
@@ -773,6 +884,8 @@ export class AgentRunner {
         messages
       });
 
+      let totalToolCallsMade = 0;
+
       // Handle tool use loop
       while (response.stop_reason === 'tool_use') {
         // Find ALL tool_use blocks in the response (Claude can make multiple parallel tool calls)
@@ -780,6 +893,7 @@ export class AgentRunner {
 
         if (toolUses.length === 0) break;
 
+        totalToolCallsMade += toolUses.length;
         console.log(`Agent is using ${toolUses.length} tool(s): ${toolUses.map(t => t.name).join(', ')}`);
 
         // Execute all tools in parallel
@@ -971,6 +1085,13 @@ export class AgentRunner {
       const executionTimeSec = (executionTimeMs / 1000).toFixed(2);
       const executionTimeMin = (executionTimeMs / 60000).toFixed(2);
 
+      // Warn if agent made zero tool calls despite having tools available — likely hallucination.
+      const agentHasTools = tools.length > 0;
+      const zeroToolCalls = totalToolCallsMade === 0 && agentHasTools;
+      if (zeroToolCalls) {
+        console.warn(`⚠️  [${agentName}] Agent completed without making ANY tool calls despite ${tools.length} tools being available. Output may be hallucinated.`);
+      }
+
       const result = {
         agentName,
         success: true,
@@ -979,6 +1100,8 @@ export class AgentRunner {
         executionTimeMs,
         executionTimeSec,
         executionTimeMin,
+        toolCallsMade: totalToolCallsMade,
+        hallucinationWarning: zeroToolCalls,
         llmBackend: this.useOllama ? 'Ollama' : this.useGemini ? 'Gemini' : 'Claude',
         llmModel: this.model
       };
@@ -1295,6 +1418,8 @@ AI Critics: ${(this.config.thoughtleadership?.AICritics || []).join(', ') || 'No
 Web Sources: ${(this.config.thoughtleadership?.webSources || []).join(', ') || 'None'}
 Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || []).join(', ') || 'None'}
 Reddit Sources (top ${this.config.thoughtleadership?.redditSources?.topPosts || 3} posts each): ${(this.config.thoughtleadership?.redditSources?.subreddits || []).map(s => `${s.name} (${s.reason})`).join(', ') || 'None'}
+NYTimes Tech & AI: Use the nytimes MCP to fetch the top ${this.config.thoughtleadership?.nyTimes?.topArticlesCount || 3} articles from the "${(this.config.thoughtleadership?.nyTimes?.sections || ['technology']).join('", "')}" section(s). Filter for articles related to: ${(this.config.thoughtleadership?.nyTimes?.filterTopics || []).join(', ')}.
+The Atlantic: Use the theatlantic MCP to fetch the top ${this.config.thoughtleadership?.theAtlantic?.topArticlesCount || 3} articles. Filter for articles related to: ${(this.config.thoughtleadership?.theAtlantic?.filterTopics || []).join(', ')}.
 **CRITICAL: ONLY use RSS feeds listed above. DO NOT search for or use any RSS feeds not explicitly listed here.**
 
 ## Releases
@@ -1342,114 +1467,79 @@ ${(() => {
 
   /**
    * Build tools schema for Claude from MCP tools + custom filesystem tools
-   * Filters tools based on agent type to reduce token overhead
+   * Filters tools based on agent-level ## MCPs configuration in the agent markdown file.
+   * Falls back to legacy hardcoded filtering for agents without an ## MCPs section.
    */
   buildToolsSchema(agentName) {
     const availableTools = this.mcpClient.getAvailableTools();
+    const agentMCPs = this.loadAgentMCPs(agentName);
 
-    // Define health agents (only use health MCPs)
-    const healthAgents = ['mydailyhealth'];
-    
-    // Define agents that should include health MCPs (for health check-ins)
-    const agentsWithHealthMCPs = ['daily-brief'];
-    
-    // Get MCP configuration from config
-    const mcpConfig = this.config?.mcp || {};
-    const healthServers = mcpConfig.health?.servers || [];
-    const workServers = mcpConfig.work?.servers || [];
+    let filteredTools;
 
-    let filteredTools = availableTools;
-
-    // For health agents, only include health MCP servers
-    if (healthAgents.includes(agentName)) {
-      // First, log all available MCP servers for debugging
-      const allServers = [...new Set(availableTools.map(t => t.server))];
-      console.log(`[buildToolsSchema] All available MCP servers: ${allServers.join(', ')}`);
-      
-      // Normalize configured health server names for matching
-      const normalizedHealthServers = healthServers.map(s => this.normalizeServerName(s));
-      
-      // Filter to only include tools from health MCP servers
-      // Use flexible matching with normalization
-      filteredTools = availableTools.filter(tool => {
-        const normalizedServerName = this.normalizeServerName(tool.server);
-        return normalizedHealthServers.some(normalizedHealthServer => {
-          // Check if normalized server name contains the health server keyword, or vice versa
-          return normalizedServerName.includes(normalizedHealthServer) || 
-                 normalizedHealthServer.includes(normalizedServerName) ||
-                 // Also check original names for exact matches
-                 tool.server.toLowerCase().includes(normalizedHealthServer) ||
-                 normalizedHealthServer.includes(tool.server.toLowerCase());
+    if (agentMCPs !== null) {
+      // --- Per-agent MCP config path ---
+      if (agentMCPs === 'user-selected') {
+        // research-ask style: MCPs passed as a runtime param
+        if (this.agentParams?.mcps) {
+          const selectedMcps = this.agentParams.mcps.split(',').map(s => s.trim().toLowerCase());
+          filteredTools = availableTools.filter(tool => {
+            const server = (tool.server || '').toLowerCase();
+            return selectedMcps.some(sel => server.includes(sel) || sel.includes(server));
+          });
+          console.log(`[buildToolsSchema] User-selected MCPs for ${agentName}: [${selectedMcps.join(', ')}], ${filteredTools.length} tools`);
+        } else {
+          filteredTools = availableTools;
+          console.log(`[buildToolsSchema] User-selected MCPs for ${agentName}: no param provided, all ${filteredTools.length} tools included`);
+        }
+      } else if (agentMCPs.length === 0) {
+        // No MCPs needed — only custom filesystem tools
+        filteredTools = [];
+        console.log(`[buildToolsSchema] No MCPs configured for ${agentName}, using custom tools only`);
+      } else {
+        // Filter to exactly the listed MCPs using flexible name matching
+        filteredTools = availableTools.filter(tool => {
+          const normalizedServer = this.normalizeServerName(tool.server);
+          return agentMCPs.some(mcp => {
+            const normalizedMcp = this.normalizeServerName(mcp);
+            return normalizedServer.includes(normalizedMcp) || normalizedMcp.includes(normalizedServer);
+          });
         });
-      });
-      
-      // Log which servers matched
-      const matchedServers = [...new Set(filteredTools.map(t => t.server))];
-      const unmatchedHealthServers = healthServers.filter(healthServer => {
-        const normalized = this.normalizeServerName(healthServer);
-        return !matchedServers.some(server => {
-          const normalizedServer = this.normalizeServerName(server);
-          return normalizedServer.includes(normalized) || normalized.includes(normalizedServer);
+        const matchedServers = [...new Set(filteredTools.map(t => t.server))];
+        const unmatchedMCPs = agentMCPs.filter(mcp => {
+          const normalizedMcp = this.normalizeServerName(mcp);
+          return !matchedServers.some(s => {
+            const ns = this.normalizeServerName(s);
+            return ns.includes(normalizedMcp) || normalizedMcp.includes(ns);
+          });
         });
-      });
-      
-      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: ${healthServers.length} configured health MCP servers (${healthServers.join(', ')}), ${matchedServers.length} matched servers (${matchedServers.join(', ')}), ${filteredTools.length} tools available`);
-      if (unmatchedHealthServers.length > 0) {
-        console.warn(`[buildToolsSchema] ⚠️  Health MCP servers configured but not found/connected: ${unmatchedHealthServers.join(', ')}`);
-        console.warn(`[buildToolsSchema] ⚠️  Please verify these servers are configured in Claude Desktop and connected successfully`);
+        console.log(`[buildToolsSchema] Configured MCPs for ${agentName}: [${agentMCPs.join(', ')}], matched: [${matchedServers.join(', ')}], ${filteredTools.length} tools`);
+        if (unmatchedMCPs.length > 0) {
+          console.warn(`[buildToolsSchema] ⚠️  MCPs configured but not found/connected for ${agentName}: ${unmatchedMCPs.join(', ')}`);
+        }
       }
-    } else if (agentsWithHealthMCPs.includes(agentName)) {
-      // For agents that need health MCPs (like daily-brief), include all tools (work + health)
-      // Don't filter out health MCP servers - these agents need both work and health tools
-      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: including health MCPs (${healthServers.join(', ')}) for health check-in, ${filteredTools.length} tools available`);
     } else {
-      // For other work agents, exclude health MCP servers
+      // --- Legacy fallback: no ## MCPs section in agent file ---
+      const mcpConfig = this.config?.mcp || {};
+      const healthServers = mcpConfig.health?.servers || [];
+
       filteredTools = availableTools.filter(tool => {
         const serverName = tool.server.toLowerCase();
-        return !healthServers.some(healthServer => 
+        return !healthServers.some(healthServer =>
           serverName.includes(healthServer.toLowerCase())
         );
       });
-      console.log(`[buildToolsSchema] Filtered tools for ${agentName}: excluded health MCPs (${healthServers.join(', ')}), ${filteredTools.length} tools available`);
-    }
-
-    // For mixpanel-query agent, ONLY include Mixpanel MCP tools to avoid 200k+ token prompt
-    if (agentName === 'mixpanel-query') {
-      const beforeCount = filteredTools.length;
-      filteredTools = filteredTools.filter(tool => {
-        const server = (tool.server || '').toLowerCase();
-        return server.includes('mixpanel');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for mixpanel-query: Mixpanel-only, ${filteredTools.length}/${beforeCount} tools (reduces prompt size significantly)`);
-    }
-
-    // For specific-network-telemetry agent, only include Mixpanel tools
-    // This agent focuses exclusively on querying Mixpanel Insights reports
-    if (agentName === 'specific-network-telemetry') {
-      filteredTools = filteredTools.filter(tool => {
-        const serverName = tool.server.toLowerCase();
-        return serverName.includes('mixpanel');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for specific-network-telemetry: Mixpanel-only, ${filteredTools.length} tools available`);
-    }
-
-    // For feature-telemetry-tracking agent, only include Mixpanel tools
-    if (agentName === 'feature-telemetry-tracking') {
-      filteredTools = filteredTools.filter(tool => {
-        const serverName = (tool.server || '').toLowerCase();
-        return serverName.includes('mixpanel');
-      });
-      console.log(`[buildToolsSchema] Filtered tools for feature-telemetry-tracking: Mixpanel-only, ${filteredTools.length} tools available`);
+      console.log(`[buildToolsSchema] Legacy filter for ${agentName}: excluded health MCPs (${healthServers.join(', ')}), ${filteredTools.length} tools available`);
     }
 
     const mcpTools = filteredTools.map(tool => ({
       name: tool.name,
-      description: tool.schema.description || `Tool from ${tool.server} server`,
+      description: `[${tool.server}] ${tool.schema.description || `Tool from ${tool.server} server`}`,
       input_schema: tool.schema.inputSchema || {
         type: 'object',
         properties: {},
         required: []
-      }
+      },
+      _server: tool.server  // preserved for Gemini priority sorting; stripped before API call
     }));
 
     // Add custom filesystem tools using ToolHandler (always include)

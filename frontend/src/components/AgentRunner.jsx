@@ -24,6 +24,7 @@ function AgentRunner({ password, onClose }) {
     { name: 'performance-review-q3', category: 'Team', displayName: 'Q3 Performance Review (WL)', description: 'Generate Q3 performance review using Workleap questionnaire format', requiresParam: 'email', lastRun: null },
     { name: 'performance-review-q4', category: 'Team', displayName: 'Q4 Performance Review (WL)', description: 'Generate Q4 performance review: strengths, improvement areas, and overall rating based on impact and contributions', requiresParam: 'email', paramType: 'teamMemberEmail', lastRun: null },
     { name: 'thoughtleadership-updates', category: 'Prep', displayName: 'Thought Leadership', description: 'Product thought leadership and new topics', lastRun: null },
+    { name: 'edge-intel', category: 'Prep', displayName: 'Edge Intel', description: 'Provocative & contrarian: newest ideas, controversial takes, original findings only', lastRun: null },
     { name: 'strategy-roadmap', category: 'Business', displayName: 'Strategy Roadmap', description: 'Strategy roadmap', lastRun: null },
     { name: 'slack-user-analysis', category: 'Team', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', paramType: 'slackUserTeam', lastRun: null },
     { name: '1-1', category: 'Team', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', paramType: 'oneOnOne', lastRun: null },
@@ -33,6 +34,7 @@ function AgentRunner({ password, onClose }) {
     { name: 'icp-inspector', category: 'Business', displayName: 'ICP Inspector', description: 'Cross-check CRM companies (20–250 seats) with Gong calls and VoC; split by closed won/lost', lastRun: null },
     { name: 'feature-insights', category: 'Business', displayName: 'FY27 Feature Insights', description: 'Mine Slack, VoC, and Jira for OV/Officevibe feature requests and produce a prioritized FY27 ideas list', lastRun: null },
     { name: 'bi-weekly-team', category: 'Team', displayName: 'Bi-Weekly Team Meeting', description: 'Prepare a short agenda doc for the OV bi-weekly sync: attendance, business health, eng highlights, and discussion topics', requiresParam: 'manualSourcesFolder', lastRun: null },
+    { name: 'podcast-digest', category: 'Prep', displayName: 'Podcast Digest', description: 'Critical learning digest from podcast clip notes in OneNote → General section', lastRun: null },
 
   ])
 
@@ -57,6 +59,7 @@ function AgentRunner({ password, onClose }) {
   const [executionLogs, setExecutionLogs] = useState([])
   const [executionId, setExecutionId] = useState(null)
   const [detailedError, setDetailedError] = useState(null)
+  const [activeLlm, setActiveLlm] = useState(null)
   const logsEndRef = useRef(null)
 
   // Auto-scroll to bottom when new logs arrive
@@ -66,17 +69,27 @@ function AgentRunner({ password, onClose }) {
     }
   }, [executionLogs])
 
-  // Fetch config data (releases, team members, 1-1s)
+  // Fetch config data (releases, team members, 1-1s) and active LLM settings
   useEffect(() => {
     const fetchConfigData = async () => {
       try {
         const headers = password ? { 'x-app-password': password } : {}
-        const response = await fetch(`${API_URL}/api/config`, { headers })
-        if (!response.ok) return
-        const config = await response.json()
-        setReleases(config.releases || {})
-        setTeamMembers(config.team?.ovTeamMembers || [])
-        setOneOnOnes(config.team?.['1-1s'] || [])
+        const [configRes, settingsRes] = await Promise.all([
+          fetch(`${API_URL}/api/config`, { headers }),
+          fetch(`${API_URL}/api/settings/llm`, { headers })
+        ])
+        if (configRes.ok) {
+          const config = await configRes.json()
+          setReleases(config.releases || {})
+          setTeamMembers(config.team?.ovTeamMembers || [])
+          setOneOnOnes(config.team?.['1-1s'] || [])
+        }
+        if (settingsRes.ok) {
+          const s = await settingsRes.json()
+          const icon = s.useOllama ? '🦙' : s.useGemini ? '💎' : '🔑'
+          const model = s.useOllama ? s.ollamaModel : s.useGemini ? s.geminiModel : s.claudeModel
+          setActiveLlm({ icon, model })
+        }
       } catch (err) {
         console.error('Error fetching config:', err)
       }
@@ -374,7 +387,14 @@ function AgentRunner({ password, onClose }) {
       <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="bg-gradient-to-r from-[#00203F] via-teal-700 to-teal-600 px-6 py-4 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-white">Run Agent Reports</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-bold text-white">Run Agent Reports</h2>
+            {activeLlm && (
+              <span className="text-xs font-medium bg-white/20 text-white px-2.5 py-1 rounded-full">
+                {activeLlm.icon} {activeLlm.model}
+              </span>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"

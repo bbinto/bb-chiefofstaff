@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import { extractOneLineSummary, extractInsights } from '../src/utils/summary-extractor.js';
@@ -80,8 +81,6 @@ function savePersistedLLMSettings(settings) {
     console.error('[LLM Settings] Failed to save llm-settings.json:', err.message);
   }
 }
-
-const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || null;
 
 const _persisted = loadPersistedLLMSettings();
 let llmSettings = {
@@ -937,31 +936,34 @@ app.post('/api/reports/compare', async (req, res) => {
   const content1 = fs.readFileSync(path1, 'utf8');
   const content2 = fs.readFileSync(path2, 'utf8');
 
-  const prompt = [
-    'You are an expert analyst comparing two AI-generated reports to evaluate LLM output quality differences.',
-    'Compare the two reports below and return a JSON object with exactly this structure:',
-    '{',
-    '  "summary": "2-3 sentence overall comparison",',
-    '  "contentDifferences": [',
-    '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
-    '  ],',
-    '  "formattingDifferences": [',
-    '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
-    '  ],',
-    '  "overallVerdict": "report1_better | report2_better | comparable",',
-    '  "overallReason": "string"',
-    '}',
-    '',
-    'For contentDifferences, evaluate aspects like: accuracy, completeness, depth of analysis, actionability, key insights quality.',
-    'For formattingDifferences, evaluate aspects like: structure, use of headings, use of lists/tables, readability, length appropriateness.',
-    'Return ONLY the JSON object, no markdown code fences, no extra text.',
-    '',
-    `=== REPORT 1: ${report1} ===`,
-    content1,
-    '',
-    `=== REPORT 2: ${report2} ===`,
-    content2
-  ].join('\n');
+  const prompt = {
+    system: [
+      'You are an expert analyst comparing two AI-generated reports to evaluate LLM output quality differences.',
+      'Compare the two reports below and return a JSON object with exactly this structure:',
+      '{',
+      '  "summary": "2-3 sentence overall comparison",',
+      '  "contentDifferences": [',
+      '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
+      '  ],',
+      '  "formattingDifferences": [',
+      '    { "aspect": "string", "report1": "string", "report2": "string", "verdict": "report1_better | report2_better | comparable" }',
+      '  ],',
+      '  "overallVerdict": "report1_better | report2_better | comparable",',
+      '  "overallReason": "string"',
+      '}',
+      '',
+      'For contentDifferences, evaluate aspects like: accuracy, completeness, depth of analysis, actionability, key insights quality.',
+      'For formattingDifferences, evaluate aspects like: structure, use of headings, use of lists/tables, readability, length appropriateness.',
+      'Return ONLY the JSON object, no markdown code fences, no extra text.',
+    ].join('\n'),
+    user: [
+      `=== REPORT 1: ${report1} ===`,
+      content1,
+      '',
+      `=== REPORT 2: ${report2} ===`,
+      content2
+    ].join('\n'),
+  };
 
   try {
     let text;
@@ -1073,8 +1075,17 @@ app.post('/api/run-agents', async (req, res) => {
     // Build command arguments (for direct node invocation, not npm)
     const args = [];
 
+    // Split thoughtleadership-updates into two focused sub-agents to stay under token limits:
+    //   thoughtleadership-rss  → RSS feeds, AI Critics, Reddit, NYTimes (API tools only)
+    //   thoughtleadership-web  → Web sources, Industry News (web browsing only)
+    const expandedAgents = agents.flatMap(a =>
+      a === 'thoughtleadership-updates'
+        ? ['thoughtleadership-rss', 'thoughtleadership-web']
+        : [a]
+    );
+
     // Add agent names
-    agents.forEach(agent => args.push(agent));
+    expandedAgents.forEach(agent => args.push(agent));
 
     // Add date range if provided
     console.log('Date range check - startDate:', dateRange?.startDate, 'endDate:', dateRange?.endDate);
@@ -1116,6 +1127,18 @@ app.post('/api/run-agents', async (req, res) => {
         args.push('--feature', featureVal);
         console.log('[Server] Adding feature parameter:', featureVal);
       }
+    }
+    if (parameters?.slackWorkspace) {
+      args.push('--workspace', parameters.slackWorkspace);
+      console.log('[Server] Adding workspace parameter:', parameters.slackWorkspace);
+    }
+    if (parameters?.prompt) {
+      args.push('--prompt', parameters.prompt);
+      console.log('[Server] Adding prompt parameter:', parameters.prompt);
+    }
+    if (parameters?.mcps) {
+      args.push('--mcps', parameters.mcps);
+      console.log('[Server] Adding mcps parameter:', parameters.mcps);
     }
 
     const commandStr = `node src/index.js ${args.join(' ')}`;
@@ -1165,20 +1188,30 @@ app.post('/api/run-agents', async (req, res) => {
       startTime: new Date()
     });
 
-    // Capture stdout — echo to CLI and store for frontend
+    // Open a persistent log file for this execution
+    const logsDir = path.join(__dirname, '..', 'logs');
+    if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+    const agentSlug = expandedAgents.join('+').replace(/[^a-zA-Z0-9+\-_]/g, '_');
+    const logFilePath = path.join(logsDir, `agent-run-${executionId}-${agentSlug}.log`);
+    const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+    logStream.write(`=== Agent Run ===\nAgents: ${expandedAgents.join(', ')}\nStarted: ${new Date().toISOString()}\nPID: ${child.pid}\nCommand: ${commandStr}\n\n`);
+
+    // Capture stdout — echo to CLI, store for frontend, and persist to disk
     child.stdout.on('data', (data) => {
       const log = data.toString();
       process.stdout.write(log);
+      logStream.write(log);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stdout', message: log, timestamp: new Date() });
       }
     });
 
-    // Capture stderr — echo to CLI and store for frontend
+    // Capture stderr — echo to CLI, store for frontend, and persist to disk
     child.stderr.on('data', (data) => {
       const log = data.toString();
       process.stderr.write(log);
+      logStream.write(`[stderr] ${log}`);
       const execution = activeExecutions.get(executionId);
       if (execution) {
         execution.logs.push({ type: 'stderr', message: log, timestamp: new Date() });
@@ -1194,6 +1227,8 @@ app.post('/api/run-agents', async (req, res) => {
         execution.exitCode = code;
         execution.endTime = new Date();
       }
+      logStream.write(`\n=== Finished: ${new Date().toISOString()} | exit code ${code} ===\n`);
+      logStream.end();
     });
 
     // Handle process errors
@@ -1205,6 +1240,8 @@ app.post('/api/run-agents', async (req, res) => {
         execution.error = error.message;
         execution.logs.push({ type: 'error', message: error.message, timestamp: new Date() });
       }
+      logStream.write(`\n=== Error: ${error.message} | ${new Date().toISOString()} ===\n`);
+      logStream.end();
     });
 
     // Send immediate response that execution has started
@@ -1492,6 +1529,47 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
   });
 });
 
+// Return list of configured MCP server names (filtered to those listed in config.json)
+app.get('/api/mcp-servers', (req, res) => {
+  try {
+    // Load the project config to get the allowed MCP list
+    const projectConfigPath = path.join(__dirname, '..', 'config.json');
+    const projectConfig = JSON.parse(fs.readFileSync(projectConfigPath, 'utf8'));
+    const allowedServers = [
+      ...(projectConfig.mcp?.work?.servers || []),
+      ...(projectConfig.mcp?.health?.servers || [])
+    ];
+
+    // Load the Claude Desktop config to get actual server details
+    const homeDir = os.homedir();
+    const candidates = [
+      process.env.MCP_CONFIG_PATH,
+      path.join(homeDir, '.config', 'claude', 'claude_desktop_config.json'),
+      path.join(homeDir, '.config', 'Claude', 'claude_desktop_config.json'),
+      path.join(homeDir, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+    ].filter(Boolean);
+
+    let desktopServers = {};
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        desktopServers = JSON.parse(fs.readFileSync(candidate, 'utf8')).mcpServers || {};
+        console.log(`[mcp-servers] Desktop config: ${Object.keys(desktopServers).length} servers; allowed by config.json: ${allowedServers.length}`);
+        break;
+      }
+    }
+
+    // Return only servers that are both in config.json and in the desktop config
+    const servers = allowedServers
+      .filter(name => desktopServers[name])
+      .map(name => ({ name, command: desktopServers[name].command, args: desktopServers[name].args || [] }));
+
+    res.json({ servers });
+  } catch (error) {
+    console.error('Error loading MCP servers:', error);
+    res.status(500).json({ error: 'Failed to load MCP servers', details: error.message });
+  }
+});
+
 // Check MCP connection status
 app.get('/api/mcp-status', async (req, res) => {
   try {
@@ -1710,6 +1788,49 @@ app.post('/api/mcp-clear-cache', async (req, res) => {
   }
 });
 
+// ─── MCP Config Editor ────────────────────────────────────────────────────────
+
+const MCP_CONFIG_PATH = path.join(os.homedir(), '.config', 'claude', 'claude_desktop_config.json');
+
+// Get the claude_desktop_config.json contents
+app.get('/api/mcp-config', (req, res) => {
+  try {
+    if (!fs.existsSync(MCP_CONFIG_PATH)) {
+      return res.status(404).json({ error: 'Config file not found', path: MCP_CONFIG_PATH });
+    }
+    const raw = fs.readFileSync(MCP_CONFIG_PATH, 'utf8');
+    res.json({ content: raw, path: MCP_CONFIG_PATH });
+  } catch (error) {
+    console.error('Error reading MCP config:', error);
+    res.status(500).json({ error: 'Failed to read config file', details: error.message });
+  }
+});
+
+// Save the claude_desktop_config.json contents
+app.put('/api/mcp-config', (req, res) => {
+  try {
+    const { content } = req.body;
+    if (typeof content !== 'string') {
+      return res.status(400).json({ error: 'content must be a string' });
+    }
+    // Validate JSON before saving
+    JSON.parse(content);
+    // Write a backup first
+    const backupPath = MCP_CONFIG_PATH + '.bak';
+    if (fs.existsSync(MCP_CONFIG_PATH)) {
+      fs.copyFileSync(MCP_CONFIG_PATH, backupPath);
+    }
+    fs.writeFileSync(MCP_CONFIG_PATH, content, 'utf8');
+    res.json({ success: true, message: 'Config saved successfully', path: MCP_CONFIG_PATH });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return res.status(400).json({ error: 'Invalid JSON', details: error.message });
+    }
+    console.error('Error saving MCP config:', error);
+    res.status(500).json({ error: 'Failed to save config file', details: error.message });
+  }
+});
+
 // ─── Manual Sources Upload ────────────────────────────────────────────────────
 
 const MANUAL_SOURCES_DIR = path.join(__dirname, '..', 'manual_sources');
@@ -1857,6 +1978,164 @@ app.get('/api/upload-weeks', (req, res) => {
 });
 
 // ─── End Manual Sources Upload ────────────────────────────────────────────────
+
+// ─── LLM Evaluator ────────────────────────────────────────────────────────────
+
+// Return MCP servers from claude_desktop_config.json
+app.get('/api/llm-eval/mcp-servers', async (req, res) => {
+  try {
+    const { MCPClientManager } = await import('../src/mcp-client.js');
+    const mcpClient = new MCPClientManager();
+    const mcpServers = mcpClient.loadMCPConfig();
+    res.json(mcpServers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Run a prompt against a specific LLM and return the response + latency
+app.post('/api/llm-eval/run', async (req, res) => {
+  const { backend, model, prompt, systemPrompt } = req.body;
+  if (!backend || !model || !prompt) {
+    return res.status(400).json({ error: 'backend, model, and prompt are required' });
+  }
+
+  const start = Date.now();
+
+  try {
+    let response = '';
+
+    if (backend === 'claude') {
+      const apiKey = ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
+
+      const body = {
+        model,
+        max_tokens: 2048,
+        messages: [{ role: 'user', content: prompt }]
+      };
+      if (systemPrompt) body.system = systemPrompt;
+
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'x-api-key': apiKey
+        },
+        body: JSON.stringify(body)
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error?.message || `Claude API error ${r.status}`);
+      response = extractAnthropicText(data);
+
+    } else if (backend === 'gemini') {
+      const apiKey = GOOGLE_GEMINI_API_KEY;
+      if (!apiKey) throw new Error('GOOGLE_GEMINI_API_KEY is not configured');
+
+      const messages = [];
+      if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: 'user', content: prompt });
+
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ model, messages, max_tokens: 2048 })
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error?.message || `Gemini API error ${r.status}`);
+      response = data?.choices?.[0]?.message?.content || '';
+      if (!response) {
+        const fr = data?.choices?.[0]?.finish_reason;
+        throw new Error(`Gemini returned no content (finish_reason: ${fr ?? 'null'}). The model may have blocked the request — try a different model or simplify the prompt.`);
+      }
+
+    } else if (backend === 'ollama') {
+      const endpoint = buildOllamaChatUrl(llmSettings.ollamaBaseUrl);
+      const headers = { 'Content-Type': 'application/json' };
+      if (llmSettings.ollamaApiKey) headers['Authorization'] = `Bearer ${llmSettings.ollamaApiKey}`;
+
+      const messages = [];
+      if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+      messages.push({ role: 'user', content: prompt });
+
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model, messages, max_tokens: 2048 })
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error?.message || data?.error || `Ollama error ${r.status}`);
+      response = extractOllamaText(data);
+
+    } else {
+      throw new Error(`Unknown backend: ${backend}`);
+    }
+
+    res.json({ response, latencyMs: Date.now() - start, model, backend });
+  } catch (err) {
+    res.json({ error: err.message, latencyMs: Date.now() - start, model, backend });
+  }
+});
+
+const EVAL_NOTES_FILE = path.join(__dirname, '..', 'llm-eval-notes.json');
+const REPORT_NOTES_FILE = path.join(__dirname, '..', 'report-notes.json');
+
+function loadReportNotes() {
+  try {
+    return fs.existsSync(REPORT_NOTES_FILE) ? JSON.parse(fs.readFileSync(REPORT_NOTES_FILE, 'utf8')) : {};
+  } catch { return {}; }
+}
+
+// Returns set of filenames that have non-empty notes
+app.get('/api/reports-notes-index', (req, res) => {
+  const all = loadReportNotes();
+  const withNotes = Object.keys(all).filter(k => all[k] && all[k].trim().length > 0);
+  res.json({ filenames: withNotes });
+});
+
+app.get('/api/reports/:filename/notes', (req, res) => {
+  const all = loadReportNotes();
+  res.json({ notes: all[req.params.filename] || '' });
+});
+
+app.post('/api/reports/:filename/notes', (req, res) => {
+  try {
+    const all = loadReportNotes();
+    all[req.params.filename] = req.body.notes ?? '';
+    fs.writeFileSync(REPORT_NOTES_FILE, JSON.stringify(all, null, 2));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/llm-eval/notes', (req, res) => {
+  try {
+    const data = fs.existsSync(EVAL_NOTES_FILE) ? JSON.parse(fs.readFileSync(EVAL_NOTES_FILE, 'utf8')) : { notes: '' };
+    res.json(data);
+  } catch {
+    res.json({ notes: '' });
+  }
+});
+
+app.post('/api/llm-eval/notes', (req, res) => {
+  try {
+    const { notes } = req.body;
+    fs.writeFileSync(EVAL_NOTES_FILE, JSON.stringify({ notes: notes ?? '' }, null, 2));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── End LLM Evaluator ────────────────────────────────────────────────────────
 
 // Handle client-side routing - serve index.html for .md URLs
 app.get('/*.md', (req, res) => {

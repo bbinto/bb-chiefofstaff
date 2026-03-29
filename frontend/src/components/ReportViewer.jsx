@@ -518,11 +518,13 @@ function ReportViewer({ report, onBack, onDeleteSuccess, password }) {
     }
   }
 
-  const loadNotes = () => {
+  const loadNotes = async () => {
     try {
-      const savedNotes = localStorage.getItem(`report-notes-${report.filename}`)
-      if (savedNotes) {
-        setNotes(savedNotes)
+      const headers = password ? { 'x-app-password': password } : {}
+      const r = await fetch(`${API_URL}/api/reports/${encodeURIComponent(report.filename)}/notes`, { headers })
+      if (r.ok) {
+        const data = await r.json()
+        setNotes(data.notes || '')
       }
     } catch (err) {
       console.error('Error loading notes:', err)
@@ -532,7 +534,13 @@ function ReportViewer({ report, onBack, onDeleteSuccess, password }) {
   const handleSaveNotes = async () => {
     try {
       setNotesSaving(true)
-      localStorage.setItem(`report-notes-${report.filename}`, notes)
+      const headers = { 'Content-Type': 'application/json', ...(password ? { 'x-app-password': password } : {}) }
+      const r = await fetch(`${API_URL}/api/reports/${encodeURIComponent(report.filename)}/notes`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ notes })
+      })
+      if (!r.ok) throw new Error(`Server returned ${r.status}`)
       setNotesEditing(false)
     } catch (err) {
       console.error('Error saving notes:', err)
@@ -543,7 +551,7 @@ function ReportViewer({ report, onBack, onDeleteSuccess, password }) {
   }
 
   const handleCancelEdit = () => {
-    loadNotes() // Reload original notes
+    loadNotes()
     setNotesEditing(false)
   }
 

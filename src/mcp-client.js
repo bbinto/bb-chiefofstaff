@@ -150,6 +150,97 @@ export class MCPClientManager {
   }
 
   /**
+   * Normalize a server name for flexible matching.
+   * Strips "mcp-" / "-mcp" affixes and all dashes/underscores so that
+   * e.g. "rss-mcp", "mcp-rss", and "RSS-MCP" all reduce to "rss".
+   */
+  normalizeServerName(name) {
+    return name.toLowerCase()
+      .replace(/^mcp[-_]?/, '')
+      .replace(/[-_]mcp$/, '')
+      .replace(/[-_]/g, '')
+      .trim();
+  }
+
+  /**
+   * Connect only the MCP servers required by a specific agent.
+   * Already-connected servers are skipped (idempotent).
+   *
+   * @param {string[]|null} serverNames
+   *   - string[]  connect only servers whose names match one of these (flexible matching)
+   *   - []        no MCPs needed — skip all connections
+   *   - null      legacy fallback — connect every configured server
+   */
+  async initializeForServers(serverNames) {
+    const mcpServers = this.loadMCPConfig();
+    const allConfigNames = Object.keys(mcpServers);
+
+    let targetNames;
+    if (serverNames === null) {
+      // Legacy / no ## MCPs section — connect everything
+      targetNames = allConfigNames;
+      console.log(`[MCPClientManager] Lazy init: connecting all ${targetNames.length} configured MCP server(s) (legacy fallback)`);
+    } else if (serverNames.length === 0) {
+      console.log(`[MCPClientManager] Lazy init: no MCPs required for this agent — skipping connections`);
+      return;
+    } else {
+      // Match requested names against config keys using flexible normalisation
+      targetNames = allConfigNames.filter(configName => {
+        const nc = this.normalizeServerName(configName);
+        return serverNames.some(req => {
+          const nr = this.normalizeServerName(req);
+          return nc.includes(nr) || nr.includes(nc);
+        });
+      });
+
+      // Warn about requested MCPs that don't exist in config
+      const unmatched = serverNames.filter(req => {
+        const nr = this.normalizeServerName(req);
+        return !allConfigNames.some(configName => {
+          const nc = this.normalizeServerName(configName);
+          return nc.includes(nr) || nr.includes(nc);
+        });
+      });
+      if (unmatched.length > 0) {
+        console.warn(`[MCPClientManager] ⚠️  MCPs requested but not found in config: ${unmatched.join(', ')}`);
+      }
+      console.log(`[MCPClientManager] Lazy init: agent needs [${serverNames.join(', ')}] → matched config servers: [${targetNames.join(', ')}]`);
+    }
+
+    // Skip servers that are already connected
+    const toConnect = targetNames.filter(name => !this.clients.has(name));
+    const alreadyConnected = targetNames.filter(name => this.clients.has(name));
+
+    if (alreadyConnected.length > 0) {
+      console.log(`[MCPClientManager] Already connected: [${alreadyConnected.join(', ')}]`);
+    }
+
+    if (toConnect.length === 0) {
+      console.log(`[MCPClientManager] All required MCPs already connected — no new connections needed`);
+      return;
+    }
+
+    console.log(`[MCPClientManager] Connecting ${toConnect.length} new MCP server(s): [${toConnect.join(', ')}]`);
+
+    const connectionPromises = toConnect.map(serverName =>
+      this.connectToServerWithRetry(serverName, mcpServers[serverName])
+    );
+
+    const results = await Promise.allSettled(connectionPromises);
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+
+    console.log(`[MCPClientManager] Connected: ${successful}/${toConnect.length}`);
+    if (failed > 0) {
+      results.forEach((result, idx) => {
+        if (result.status === 'rejected') {
+          console.error(`  ✗ ${toConnect[idx]}: ${result.reason?.message || 'Unknown error'}`);
+        }
+      });
+    }
+  }
+
+  /**
    * Initialize connections to all configured MCP servers
    * Uses parallel connections with timeout and retry logic
    */
@@ -225,10 +316,20 @@ export class MCPClientManager {
     // Inject Mixpanel credentials from config if this is a Mixpanel MCP server
     const mixpanelEnv = this.getMixpanelEnvVars(serverName);
     
+    // nytimes-mcp uses pydantic-settings with extra=forbid: it crashes if it receives any
+    // env var outside its own schema. It also reads .env files from CWD via python-dotenv,
+    // which picks up our app's .env. Fix: give it a minimal env and run it from /tmp.
+    // All other servers get the standard merged process.env as before.
+    const needsIsolatedEnv = serverName.toLowerCase().includes('nytimes');
+    const baseEnv = needsIsolatedEnv
+      ? { PATH: process.env.PATH, HOME: process.env.HOME, USER: process.env.USER }
+      : { ...process.env, NODE_NO_WARNINGS: '1' };
+
     const transport = new StdioClientTransport({
       command,
       args,
-      env: { ...process.env, NODE_NO_WARNINGS: '1', ...env, ...mixpanelEnv }
+      env: { ...baseEnv, ...env, ...mixpanelEnv },
+      ...(needsIsolatedEnv ? { cwd: '/tmp' } : {})
     });
 
     const client = new Client({
@@ -318,7 +419,8 @@ export class MCPClientManager {
           console.warn(`  ⚠️  Skipping invalid tool from ${serverName}: missing name property`);
           return;
         }
-        this.tools.set(tool.name, { serverName, client, schema: tool });
+        const prefixedName = `${serverName}__${tool.name}`;
+        this.tools.set(prefixedName, { serverName, client, schema: tool, originalName: tool.name });
         registeredCount++;
       } catch (error) {
         errors.push(`Tool registration error: ${error.message}`);
@@ -387,7 +489,7 @@ export class MCPClientManager {
         try {
           // Use rate limiter to wrap the tool call
           const result = await this.mixpanelRateLimiter.withRateLimit(
-            () => client.callTool({ name: toolName, arguments: args }),
+            () => client.callTool({ name: toolInfo.originalName, arguments: args }),
             toolName
           );
 
@@ -420,7 +522,7 @@ export class MCPClientManager {
       throw lastError || new Error(`Failed to call ${toolName} after ${MIXPANEL_RATE_LIMITS.RETRY_MAX_ATTEMPTS} attempts`);
     } else {
       // For non-Mixpanel tools, call directly without rate limiting
-      const result = await client.callTool({ name: toolName, arguments: args });
+      const result = await client.callTool({ name: toolInfo.originalName, arguments: args });
 
       // Log results for Jira tools
       if (this.isJiraTool(toolName, toolInfo.serverName)) {

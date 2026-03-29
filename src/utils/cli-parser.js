@@ -21,8 +21,11 @@ export function parseAgentParams(args) {
   const reportFileIndex = args.indexOf('--report-file');
   const insightIdsIndex = args.indexOf('--insight-ids');
   const featureIndex = args.indexOf('--feature');
+  const workspaceIndex = args.indexOf('--workspace');
+  const promptIndex = args.indexOf('--prompt');
+  const mcpsIndex = args.indexOf('--mcps');
 
-  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex, 'email:', emailIndex, 'week:', weekIndex, 'reportFile:', reportFileIndex, 'feature:', featureIndex);
+  console.log('[CLI Parser] Parameter indices - slackUserId:', slackUserIdIndex, 'manualSourcesFolder:', manualSourcesFolderIndex, 'folder:', folderIndex, 'email:', emailIndex, 'week:', weekIndex, 'reportFile:', reportFileIndex, 'feature:', featureIndex, 'workspace:', workspaceIndex, 'prompt:', promptIndex, 'mcps:', mcpsIndex);
 
   if (slackUserIdIndex !== -1 && args[slackUserIdIndex + 1]) {
     params.slackUserId = args[slackUserIdIndex + 1];
@@ -108,6 +111,21 @@ export function parseAgentParams(args) {
     console.log('[CLI Parser] Found feature:', params.feature);
   }
 
+  if (workspaceIndex !== -1 && args[workspaceIndex + 1]) {
+    params.workspace = String(args[workspaceIndex + 1]).trim();
+    console.log('[CLI Parser] Found workspace:', params.workspace);
+  }
+
+  if (promptIndex !== -1 && args[promptIndex + 1]) {
+    params.prompt = String(args[promptIndex + 1]).trim();
+    console.log('[CLI Parser] Found prompt:', params.prompt);
+  }
+
+  if (mcpsIndex !== -1 && args[mcpsIndex + 1]) {
+    params.mcps = String(args[mcpsIndex + 1]).trim();
+    console.log('[CLI Parser] Found mcps:', params.mcps);
+  }
+
   console.log('[CLI Parser] Final parsed params:', params);
   return params;
 }
@@ -132,7 +150,10 @@ export function extractAgentNames(args) {
     '--week',
     '--report-file',
     '--insight-ids',
-    '--feature'
+    '--feature',
+    '--workspace',
+    '--prompt',
+    '--mcps'
   ];
 
   for (let i = 0; i < args.length; i++) {

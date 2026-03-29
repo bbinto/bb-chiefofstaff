@@ -5,6 +5,7 @@ import ReportViewer from './components/ReportViewer'
 import FilterBar from './components/FilterBar'
 import Login from './components/Login'
 import AgentRunner from './components/AgentRunner'
+import ResearchAsk from './components/ResearchAsk'
 import Analytics from './components/Analytics'
 import MCPStatus from './components/MCPStatus'
 import Settings from './components/Settings'
@@ -22,6 +23,7 @@ function AppContent() {
   const [agents, setAgents] = useState([])
   const [selectedAgent, setSelectedAgent] = useState('all')
   const [selectedWeek, setSelectedWeek] = useState('all')
+  const [selectedLlm, setSelectedLlm] = useState('all')
   const [favorites, setFavorites] = useState([])
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -101,6 +103,9 @@ function AppContent() {
 
   const toggleFavorite = async (reportId) => {
     const isFav = favorites.includes(reportId)
+    // Optimistic update — respond immediately, rollback on failure
+    const optimistic = isFav ? favorites.filter(id => id !== reportId) : [...favorites, reportId]
+    setFavorites(optimistic)
     const headers = { 'Content-Type': 'application/json', ...(password ? { 'x-app-password': password } : {}) }
     try {
       const response = await fetch(`${API_URL}/api/favorites/${encodeURIComponent(reportId)}`, {
@@ -110,9 +115,12 @@ function AppContent() {
       if (response.ok) {
         const updated = await response.json()
         setFavorites(updated)
+      } else {
+        setFavorites(favorites) // rollback
       }
     } catch (err) {
       console.error('Error toggling favorite:', err)
+      setFavorites(favorites) // rollback
     }
   }
 
@@ -149,6 +157,7 @@ function AppContent() {
   }
 
   const reportWeeks = [...new Set(reports.map(report => getWeekNumber(report.timestamp)))]
+  const llmModels = [...new Set(reports.map(r => r.llm).filter(Boolean))].sort()
 
   const predefinedWeeks = [
     '2026-W01', '2026-W02', '2026-W03', '2026-W04', '2026-W05',
@@ -160,8 +169,9 @@ function AppContent() {
   const filteredReports = reports.filter(report => {
     const matchesAgent = selectedAgent === 'all' || report.agentName === selectedAgent
     const matchesWeek = selectedWeek === 'all' || getWeekNumber(report.timestamp) === selectedWeek
+    const matchesLlm = selectedLlm === 'all' || report.llm === selectedLlm
     const matchesFavorites = !showFavoritesOnly || favorites.includes(report.id)
-    return matchesAgent && matchesWeek && matchesFavorites
+    return matchesAgent && matchesWeek && matchesLlm && matchesFavorites
   })
 
   const totalCost = filteredReports.reduce((sum, report) => sum + (report.cost || 0), 0)
@@ -232,6 +242,16 @@ function AppContent() {
               </button>
 
               <button
+                onClick={() => navigate('/research')}
+                className={navLinkClass('/research')}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                Research & Ask
+              </button>
+
+              <button
                 onClick={() => navigate('/upload')}
                 className={navLinkClass('/upload')}
               >
@@ -279,7 +299,10 @@ function AppContent() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <Routes>
-          <Route path="/upload" element={
+          <Route path="/research" element={
+            <ResearchAsk password={password} />
+          } />
+<Route path="/upload" element={
             <Upload password={password} onBack={() => navigate('/')} />
           } />
           <Route path="/settings" element={
@@ -308,6 +331,9 @@ function AppContent() {
                 selectedWeek={selectedWeek}
                 onWeekChange={setSelectedWeek}
                 formatWeekDisplay={formatWeekDisplay}
+                llmModels={llmModels}
+                selectedLlm={selectedLlm}
+                onLlmChange={setSelectedLlm}
                 reportCount={filteredReports.length}
                 totalCost={totalCost}
                 showFavoritesOnly={showFavoritesOnly}
@@ -318,6 +344,7 @@ function AppContent() {
                 onReportSelect={(report) => navigate(`/${report.filename}`)}
                 favorites={favorites}
                 onToggleFavorite={toggleFavorite}
+                password={password}
               />
             </>
           } />
