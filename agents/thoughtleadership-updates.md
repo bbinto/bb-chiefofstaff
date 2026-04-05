@@ -62,7 +62,9 @@ Before writing the final report, you MUST check previous thoughtleadership repor
   - ONLY include articles where the publication date falls within the date range specified in your configuration context
   - The date range is provided in your configuration context (see the ## Dates section)
   - Example: If date range is 2026-01-08 to 2026-01-15, ONLY include articles published between 2026-01-08 and 2026-01-15 (inclusive)
-  - **EXCLUDE any articles published before the start date** - filter out old articles that don't match the date range
+  - **EXCLUDE any articles published before the start date or after the end date** — filter them out silently
+  - **DO NOT list, mention, reference, or show any article outside the date range in any form** — not as an exclusion note, not as a skipped item, not at all
+  - Silently discard out-of-range articles and proceed as if they do not exist
   - Verify each article's publication date matches the date range before including it in your output
 - **Source Attribution**:
   - **ALWAYS check article-level metadata FIRST** - the article's actual publication is more important than the feed name:
@@ -146,7 +148,8 @@ Before writing the final report, you MUST check previous thoughtleadership repor
     - Calculate the start date based on the date range provided in your configuration context (see the ## Dates section)
     - Use the date range: Start date to End date (inclusive) in ISO format (YYYY-MM-DD)
     - **ONLY include articles where the publication date (pubDate or published date) falls within this date range**
-    - **EXCLUDE any articles published before the start date** - filter out old articles
+    - **EXCLUDE any articles published before the start date or after the end date** — discard silently, do not list or mention them
+    - **DO NOT show, reference, or note any out-of-range article in the output in any form**
     - Verify the article's publication date before including it
     - Example: If date range is 2026-01-08 to 2026-01-15, ONLY include articles with publication dates between 2026-01-08 and 2026-01-15 (inclusive)
   - **CRITICAL: Source Attribution**:
@@ -362,7 +365,7 @@ For each trending topic (bullet format — NO tables):
 - **Source diversity**: no single domain appears more than twice across all article sections
 - **At least 50% of article entries come from RSS feeds**, not web browsing
 - **Article sections use bullet format; Reddit section uses table format**
-- **ONLY articles published within the specified date range are included** - old articles are filtered out
+- **ONLY articles published within the specified date range are included** — out-of-range articles are silently discarded and never listed or mentioned
 - **All sources correctly attributed using article-level metadata (author + URL domain/publication)** - NOT feed names
 - **Article authors correctly identified from article author fields** - do not use feed author if article author differs
 - **URL domain checked to identify actual publication** - e.g., johnpcutler.com = John Cutler's The Beautiful Mess, NOT Lenny's Newsletter

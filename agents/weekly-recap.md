@@ -3,6 +3,13 @@
 ## Purpose
 Produce a **short weekly exec recap** covering product metrics, business metrics, and must-know Slack threads. Default time frame: **last 5 days**. Allow **folder input** for business metrics. Keep each section to **3–4 bullets with links**.
 
+## MCPs
+- Mixpanel
+- Gong
+- google-calendar
+- Jira
+- Slack
+
 ## Data Sources
 - Mixpanel (Officevibe MAU and all insight reports from config)
 - Manual sources folder (business metrics: closed lost, won deals; optional)

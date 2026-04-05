@@ -137,7 +137,17 @@ export class AgentRunner {
    * Ollama (OpenAI-compatible) supports the same format as Gemini.
    */
   convertParamsForOllama(params) {
-    return this.convertParamsForGemini(params);
+    const converted = this.convertParamsForGemini(params);
+
+    // Force tool use on the first turn so Ollama models don't skip straight to a text answer.
+    // Once tool results exist in the conversation (role === 'tool'), switch to 'auto' so the
+    // model can produce a final text response when it has gathered enough data.
+    if (converted.tools && converted.tools.length > 0) {
+      const hasToolResults = converted.messages.some(m => m.role === 'tool');
+      converted.tool_choice = hasToolResults ? 'auto' : 'required';
+    }
+
+    return converted;
   }
 
   /**
@@ -297,7 +307,9 @@ export class AgentRunner {
       }
 
       // Tool calls → Anthropic tool_use blocks
-      if (finishReason === 'tool_calls' && message?.tool_calls?.length > 0) {
+      // Check message.tool_calls directly — many Ollama models return finish_reason 'stop'
+      // even when tool calls are present, so we cannot rely on finish_reason alone.
+      if (message?.tool_calls?.length > 0) {
         for (const tc of message.tool_calls) {
           let input = {};
           try { input = JSON.parse(tc.function.arguments); } catch { input = { _raw: tc.function.arguments }; }
@@ -675,12 +687,13 @@ export class AgentRunner {
     // Get available tools from MCP (filtered by agent type)
     let tools = this.buildToolsSchema(agentName);
 
-    // Gemini silently returns empty responses when given too many tools.
+    // Gemini and Ollama silently ignore tools or fail to call them when given too many.
     // Cap using config limit and honour priorityServers ordering.
-    if (this.useGemini) {
-      const geminiConfig = this.config?.gemini || {};
-      const maxTools = geminiConfig.maxTools ?? 20;
-      const priorityServers = (geminiConfig.priorityServers || []).map(s => s.toLowerCase());
+    if (this.useGemini || this.useOllama) {
+      const providerKey = this.useGemini ? 'gemini' : 'ollama';
+      const providerConfig = this.config?.[providerKey] || {};
+      const maxTools = providerConfig.maxTools ?? 20;
+      const priorityServers = (providerConfig.priorityServers || []).map(s => s.toLowerCase());
 
       if (tools.length > maxTools) {
         // Sort: priority-server tools first, then the rest (preserve relative order within each group)
@@ -690,13 +703,13 @@ export class AgentRunner {
           const rest = tools.filter(t => !isPriority(t));
           tools = [...priority, ...rest];
         }
-        console.warn(`⚠️  Gemini tool limit: capping ${tools.length} tools to ${maxTools}. Priority servers: [${priorityServers.join(', ')}]. Keeping: ${tools.slice(0, maxTools).map(t => t.name).join(', ')}`);
+        console.warn(`⚠️  ${providerKey} tool limit: capping ${tools.length} tools to ${maxTools}. Priority servers: [${priorityServers.join(', ')}]. Keeping: ${tools.slice(0, maxTools).map(t => t.name).join(', ')}`);
         tools = tools.slice(0, maxTools);
       }
       // Strip internal _server field before sending to API
       tools = tools.map(({ _server, ...t }) => t);
     } else {
-      // Strip _server for non-Gemini paths too
+      // Strip _server for non-Gemini/Ollama paths too
       tools = tools.map(({ _server, ...t }) => t);
     }
 

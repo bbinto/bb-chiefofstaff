@@ -3,6 +3,11 @@
 ## Purpose
 Track and report on product development activities, engineering progress, feature launches, usage metrics, and customer conversations.
 
+## MCPs
+- Jira
+- Slack
+- google-calendar
+
 ## Data Sources
 - Jira/Atlassian (ticket completion for OV teams), use project key from `config.jira.projectKey`
 - Production Bug Filter: Use `config.jira.filters.Production_Bugs.filterId` (30480) for production bugs analysis

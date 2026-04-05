@@ -3,6 +3,10 @@
 ## Purpose
 Provide a compact, short weekly review of all epics, tickets, and Confluence pages that Officevibe assigned teams worked on, ensuring alignment with OKR goals and flagging items that are taking longer than expected to complete.
 
+## MCPs
+- Jira
+- Confluence
+
 ## Data Sources
 - Jira/Atlassian (epics, tickets, and status updates for Officevibe teams from config.json)
 - Use any relevant information from Confluence PRD space (`config.confluence.OVPRDs`) (pages created, updated, or contributed to by team members)

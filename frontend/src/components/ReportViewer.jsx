@@ -386,7 +386,6 @@ function ReportViewer({ report, onBack, onDeleteSuccess, password }) {
   const [podcastEngine] = useState('edge')
   const [podcastVoice] = useState('')
   const [podcastRate] = useState(1.0)
-
   // Parse markdown content into sections
   const parseContentSections = (markdown) => {
     const lines = markdown.split('\n')

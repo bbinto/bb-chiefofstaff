@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
 import LLMEvaluator from './LLMEvaluator'
+import Upload from './Upload'
 import { CLAUDE_MODELS, GEMINI_MODELS, OLLAMA_CLOUD_MODELS, OLLAMA_LOCAL_MODELS } from '../llmModels'
 
 // Get API URL from environment variable, fallback to relative URL
@@ -21,6 +22,10 @@ function Settings({ password, onBack }) {
   const [editedConfig, setEditedConfig] = useState('')
   const [isEditingConfig, setIsEditingConfig] = useState(false)
   const [expandedSections, setExpandedSections] = useState({})
+
+  // Notifications state
+  const [smsEnabled, setSmsEnabled] = useState(false)
+  const [phoneNumber, setPhoneNumber] = useState('')
   
   // Shared state
   const [loading, setLoading] = useState(true)
@@ -37,9 +42,46 @@ function Settings({ password, onBack }) {
       fetchSettings()
     } else if (activeTab === 'config') {
       fetchConfig()
+    } else if (activeTab === 'notifications') {
+      fetchNotificationsSettings()
     }
-    // 'evaluator' tab loads its own data internally
+    // 'evaluator' and 'upload' tabs load their own data internally
   }, [activeTab])
+
+  const fetchNotificationsSettings = async () => {
+    try {
+      setLoading(true)
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/settings/notifications`, { headers })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setSmsEnabled(data.smsEnabled ?? false)
+      setPhoneNumber(data.phoneNumber ?? '')
+    } catch (err) {
+      setError(`Failed to load notifications settings: ${err.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const saveNotificationsSettings = async () => {
+    try {
+      setSaving(true)
+      const headers = { 'Content-Type': 'application/json', ...(password ? { 'x-app-password': password } : {}) }
+      const response = await fetch(`${API_URL}/api/settings/notifications`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ smsEnabled, phoneNumber }),
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      setSaveSuccess(true)
+      setTimeout(() => setSaveSuccess(false), 3000)
+    } catch (err) {
+      setError(`Failed to save notifications settings: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const fetchSettings = async () => {
     try {
@@ -265,9 +307,29 @@ function Settings({ password, onBack }) {
         >
           ⚙️ App Configuration
         </button>
+        <button
+          onClick={() => setActiveTab('notifications')}
+          className={`px-6 py-3 font-semibold transition-colors ${
+            activeTab === 'notifications'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          📱 Notifications
+        </button>
+        <button
+          onClick={() => setActiveTab('upload')}
+          className={`px-6 py-3 font-semibold transition-colors ${
+            activeTab === 'upload'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          📤 Upload
+        </button>
       </div>
 
-      {loading && activeTab !== 'evaluator' ? (
+      {loading && activeTab !== 'evaluator' && activeTab !== 'notifications' && activeTab !== 'upload' ? (
         <div className="text-center py-12">
           <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
           <p className="mt-4 text-gray-600">Loading settings...</p>
@@ -505,7 +567,7 @@ function Settings({ password, onBack }) {
         <div className="max-w-6xl">
           <LLMEvaluator password={password} />
         </div>
-      ) : (
+      ) : activeTab === 'config' ? (
         // Config Tab Content
         <div className="max-w-4xl space-y-6">
           {config && (
@@ -585,7 +647,56 @@ function Settings({ password, onBack }) {
             </>
           )}
         </div>
-      )}
+      ) : activeTab === 'notifications' ? (
+        <div className="max-w-2xl space-y-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">SMS Notifications</h2>
+            <p className="text-sm text-gray-600 mb-6">Get a text message when any agent report finishes. Uses <strong>TextBelt</strong> free tier (1 SMS/day).</p>
+
+            <div className="space-y-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={smsEnabled}
+                  onChange={(e) => setSmsEnabled(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <span className="font-medium text-gray-900">Enable SMS notifications</span>
+              </label>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone number</label>
+                <input
+                  type="tel"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="e.g. +15551234567"
+                  disabled={!smsEnabled}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm disabled:bg-gray-100 disabled:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-xs text-gray-500">Include country code (e.g. +1 for US/Canada)</p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center gap-3">
+              <button
+                onClick={saveNotificationsSettings}
+                disabled={saving}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+              {saveSuccess && <span className="text-green-600 text-sm font-medium">Saved!</span>}
+            </div>
+          </div>
+
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-900">
+            <strong>ℹ️ Free tier:</strong> TextBelt's free key allows 1 SMS per day. For more messages, get a paid API key at <span className="font-mono">textbelt.com</span> and set <span className="font-mono">TEXTBELT_KEY</span> in your environment.
+          </div>
+        </div>
+      ) : activeTab === 'upload' ? (
+        <Upload password={password} onBack={() => setActiveTab('llm')} />
+      ) : null}
     </div>
   )
 }

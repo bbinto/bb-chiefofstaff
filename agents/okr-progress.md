@@ -3,6 +3,9 @@
 ## Purpose
 Monitor and report on OKR progress for Officevibe teams and Workleap AI initiatives, tracking updates to ideas boards and overall progress.
 
+## MCPs
+- Jira
+
 ## Data Sources
 - Jira/Atlassian Ideas Boards
 - OV OKR Board: Use `config.jira.ovOkrBoardUrl` from config.json

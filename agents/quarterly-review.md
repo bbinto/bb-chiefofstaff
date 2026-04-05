@@ -3,6 +3,10 @@
 ## Purpose
 Provide a comprehensive quarterly review of product releases, team OKR progress, and business updates for executive presentation and strategic planning.
 
+## MCPs
+- Slack
+- Jira
+
 ## Data Sources
 - Slack messages from channels from config.json: teamChannels, productGeneral, productFeedback (product launches and feedback)
 - **IMPORTANT: Use the `list_manual_sources_files` tool first** to see what files are available in the manual_sources folder
