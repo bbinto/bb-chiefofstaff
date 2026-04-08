@@ -8,6 +8,9 @@ Monitor multiple sources of product thought leadership and identify new topics, 
 - RSS-MCP
 - reddit
 - nytimes
+- Slack-LannysNewsletter
+- Slack-WomenInProduct
+- Slack-Rand
 
 ## Data Sources
 All source URLs are already provided in the **## Thought Leadership** section of your configuration context. Do NOT attempt to read any file — use only the URLs listed there.
@@ -224,7 +227,28 @@ For each subreddit listed under "Reddit Sources" in your configuration context:
 - **No duplicates**: Reddit posts must NOT appear in any other section
 - Do NOT fetch subreddits not listed in your configuration context
 
-### 6. Topic Identification and Categorization
+### 6. Community Slack Intelligence
+
+Scan the most-reacted and most-discussed posts from external product community Slack workspaces within the date range.
+
+**Workspaces and channels** (from `config["Slack-LannysNewsletter"]`, `config["Slack-WomenInProduct"]`, and `config["Slack-Rand"]`):
+- **Slack-LannysNewsletter**: channels `C015W5EUZ6D`, `C04J0R5D755` — use `mcp__Slack-LannysNewsletter__` tools
+- **Slack-WomenInProduct**: channels `C0B74V8KF`, `C0DMM8VUZ` — use `mcp__Slack-WomenInProduct__` tools
+- **Slack-Rand**: channels `C82GM1W06`, `C014Y7K5U8K` — use `mcp__Slack-Rand__` tools
+
+**Strategy**:
+1. For each channel in both workspaces, call `conversations_history` with the date range from your configuration context (ISO format)
+2. Rank messages by total reaction count — select the top 3 most-reacted posts across all 4 channels combined
+3. Also include posts with high reply counts (active discussions) or links to articles/resources that sparked engagement
+4. **Deduplication**: If a post links to an article already covered in another section of this report, skip it here
+5. **If a workspace MCP is unavailable**: Note it with ⚠️ and continue — do not fail the report
+
+**Selection criteria**:
+- Highest reaction count within the date range
+- Posts sharing an article, framework, research, or contrarian take — not casual chat or job postings
+- Topics relevant to product management, AI, leadership, or industry trends
+
+### 7. Topic Identification and Categorization
 For each source, identify:
 - **New Topics**: Concepts, frameworks, or ideas that are newly emerging
 - **Trending Topics**: Topics that are gaining significant attention
@@ -233,7 +257,7 @@ For each source, identify:
 - **Industry Insights**: Broader industry trends affecting product management
 - **Thought Leader Perspectives**: Key insights from recognized product thought leaders
 
-### 7. Relevance Assessment
+### 8. Relevance Assessment
 For each identified topic:
 - Assess relevance to current product work
 - Identify potential impact on product strategy
@@ -345,6 +369,17 @@ For each trending topic (bullet format — NO tables):
 
 **🚨 RULE**: Post link MUST be the exact `Link:` value returned by `fetch_reddit_hot_threads`. If no `Link:` was present in the tool output for that post, render the title as plain text with no link. Never construct, guess, or modify any Reddit URL.
 
+### Community Slack Highlights
+*(Top 3 most-reacted posts from Lanny's Newsletter, Women in Product, and Rand Slack workspaces — bullet format)*
+
+- **[Workspace name]** — #[channel]
+  - **Post**: [1-2 sentence summary of what was shared or discussed]
+  - **Reactions**: [total reaction count] | **Replies**: [reply count]
+  - **Link**: [article or resource URL if the post shared one, otherwise omit]
+  - **Why it matters**: [One sentence — relevance to product/AI/leadership]
+
+*(Repeat for each of the top 3 posts. If a workspace MCP is unavailable, note it with ⚠️ and skip that workspace.)*
+
 ### Recommended Actions
 - Topics to research further: [List]
 - Discussions to initiate with team: [List]
@@ -375,5 +410,8 @@ For each trending topic (bullet format — NO tables):
 - Summary is actionable and focused on what matters most
 - Sources are properly attributed with direct links to articles
 - All article references include markdown-formatted links: `[Title](url)`
+- **Community Slack Highlights** section present with top 3 most-reacted posts from Lanny's Newsletter, Women in Product, and Rand workspaces
+- Community Slack posts ranked by reaction count; casual chat and job postings excluded
+- Community workspace MCP failures handled gracefully with ⚠️ notice — report continues without them
 
 

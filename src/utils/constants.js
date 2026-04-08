@@ -84,7 +84,7 @@ export const AGENT_EXECUTION = {
 
 // MCP Configuration
 export const MCP_DEFAULTS = {
-  CONNECTION_TIMEOUT: 30000,  // 30 seconds
+  CONNECTION_TIMEOUT: 120000, // 120 seconds — large community Slack workspaces need time to build user/channel cache on first run
   MAX_RETRIES: 3,
   RETRY_DELAY: 2000,          // 2 seconds initial delay
 };

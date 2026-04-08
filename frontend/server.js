@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import multer from 'multer';
 import { extractOneLineSummary, extractInsights } from '../src/utils/summary-extractor.js';
 import { FRONTEND, PATHS } from '../src/utils/constants.js';
@@ -1100,6 +1101,24 @@ app.get('/api/agents', (req, res) => {
   }
 });
 
+// Get schedulable agent names (from agents directory, not reports)
+app.get('/api/agent-definitions', (req, res) => {
+  try {
+    const agentsDir = path.join(__dirname, '..', PATHS.AGENTS_DIR);
+    if (!fs.existsSync(agentsDir)) {
+      return res.json([]);
+    }
+    const files = fs.readdirSync(agentsDir)
+      .filter(f => f.endsWith('.md') && !f.includes('/'))
+      .map(f => f.replace('.md', ''))
+      .sort();
+    res.json(files);
+  } catch (error) {
+    console.error('Error reading agent definitions:', error);
+    res.status(500).json({ error: 'Failed to read agent definitions', details: error.message });
+  }
+});
+
 // ─── Skills ────────────────────────────────────────────────────────────────
 
 const SKILLS_DIR = process.env.VERCEL === '1'
@@ -1738,6 +1757,213 @@ app.put('/api/settings/notifications', (req, res) => {
   } catch (error) {
     console.error('Error updating notifications settings:', error);
     res.status(500).json({ error: 'Failed to update settings', details: error.message });
+  }
+});
+
+// ─── Scheduled Agents (Cron) ────────────────────────────────────────────────
+
+const CRON_MARKER = '# bb-chiefofstaff-agent';
+const PROJECT_ROOT = path.join(__dirname, '..');
+
+function readCrontab() {
+  try {
+    return execSync('crontab -l 2>/dev/null || true', { encoding: 'utf8' });
+  } catch {
+    return '';
+  }
+}
+
+function writeCrontab(content) {
+  const tmpFile = path.join(os.tmpdir(), 'crontab-tmp-' + Date.now());
+  fs.writeFileSync(tmpFile, content, 'utf8');
+  try {
+    execSync(`crontab ${tmpFile}`);
+  } finally {
+    fs.unlinkSync(tmpFile);
+  }
+}
+
+function parseCronJobs(crontabContent) {
+  const lines = crontabContent.split('\n');
+  const jobs = [];
+  let id = 0;
+  let pendingMarkerName = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Our managed marker comment
+    if (line.includes(CRON_MARKER)) {
+      const agentMatch = line.match(/# bb-chiefofstaff-agent:\s*(.+)/);
+      pendingMarkerName = agentMatch ? agentMatch[1].trim() : '';
+      continue;
+    }
+
+    // Skip empty lines and pure comments (but reset pendingMarker if comment breaks the pair)
+    if (line === '' || line.startsWith('#')) {
+      if (line.startsWith('#')) pendingMarkerName = null;
+      continue;
+    }
+
+    // Valid cron line: must start with a digit, *, or @
+    const parts = line.split(/\s+/);
+    if (parts.length >= 6) {
+      const schedule = parts.slice(0, 5).join(' ');
+      const command = parts.slice(5).join(' ');
+      const managed = pendingMarkerName !== null;
+      jobs.push({
+        id: id++,
+        agentName: pendingMarkerName || '',
+        schedule,
+        command,
+        managed,
+      });
+      pendingMarkerName = null;
+    }
+  }
+  return jobs;
+}
+
+function buildCrontabWithJobs(existingContent, jobs) {
+  // Remove all our managed blocks from existing crontab
+  const lines = existingContent.split('\n');
+  const filtered = [];
+  let skip = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes(CRON_MARKER)) {
+      skip = true;
+      // Skip this comment line and the next cron line
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === '') j++;
+      if (j < lines.length && !lines[j].trim().startsWith('#')) {
+        i = j; // skip cron line too
+      }
+      continue;
+    }
+    if (!skip) filtered.push(line);
+    skip = false;
+  }
+
+  // Remove trailing empty lines
+  while (filtered.length > 0 && filtered[filtered.length - 1].trim() === '') {
+    filtered.pop();
+  }
+
+  // Append only our managed jobs (unmanaged ones stay in the original crontab lines above)
+  for (const job of jobs.filter(j => j.managed !== false)) {
+    filtered.push(`${CRON_MARKER}: ${job.agentName}`);
+    filtered.push(`${job.schedule} ${job.command}`);
+  }
+
+  filtered.push(''); // trailing newline
+  return filtered.join('\n');
+}
+
+function buildAgentCommand(agentName) {
+  return `cd ${PROJECT_ROOT} && node src/index.js ${agentName} >> ${PROJECT_ROOT}/logs/cron-${agentName}.log 2>&1`;
+}
+
+// Get all managed cron jobs
+app.get('/api/settings/cron-jobs', (req, res) => {
+  try {
+    const crontabContent = readCrontab();
+    const jobs = parseCronJobs(crontabContent);
+    res.json(jobs);
+  } catch (error) {
+    console.error('Error reading crontab:', error);
+    res.status(500).json({ error: 'Failed to read crontab', details: error.message });
+  }
+});
+
+// Create a new cron job
+app.post('/api/settings/cron-jobs', (req, res) => {
+  try {
+    const { agentName, schedule } = req.body;
+    if (!agentName || !schedule) {
+      return res.status(400).json({ error: 'agentName and schedule are required' });
+    }
+
+    const crontabContent = readCrontab();
+    const jobs = parseCronJobs(crontabContent);
+
+    const newJob = {
+      id: jobs.length,
+      agentName,
+      schedule,
+      command: buildAgentCommand(agentName),
+      managed: true,
+    };
+    jobs.push(newJob);
+
+    const newCrontab = buildCrontabWithJobs(crontabContent, jobs);
+    writeCrontab(newCrontab);
+    res.json({ success: true, job: newJob, jobs });
+  } catch (error) {
+    console.error('Error creating cron job:', error);
+    res.status(500).json({ error: 'Failed to create cron job', details: error.message });
+  }
+});
+
+// Update an existing cron job (by index in the full jobs list — must be managed)
+app.put('/api/settings/cron-jobs/:index', (req, res) => {
+  try {
+    const idx = parseInt(req.params.index, 10);
+    const { agentName, schedule } = req.body;
+    if (!agentName || !schedule) {
+      return res.status(400).json({ error: 'agentName and schedule are required' });
+    }
+
+    const crontabContent = readCrontab();
+    const jobs = parseCronJobs(crontabContent);
+
+    if (idx < 0 || idx >= jobs.length) {
+      return res.status(404).json({ error: 'Cron job not found' });
+    }
+    if (jobs[idx].managed === false) {
+      return res.status(403).json({ error: 'Cannot edit external cron jobs from this UI' });
+    }
+
+    jobs[idx] = {
+      ...jobs[idx],
+      agentName,
+      schedule,
+      command: buildAgentCommand(agentName),
+      managed: true,
+    };
+
+    const newCrontab = buildCrontabWithJobs(crontabContent, jobs);
+    writeCrontab(newCrontab);
+    res.json({ success: true, jobs });
+  } catch (error) {
+    console.error('Error updating cron job:', error);
+    res.status(500).json({ error: 'Failed to update cron job', details: error.message });
+  }
+});
+
+// Delete a cron job (by index in the full jobs list — must be managed)
+app.delete('/api/settings/cron-jobs/:index', (req, res) => {
+  try {
+    const idx = parseInt(req.params.index, 10);
+
+    const crontabContent = readCrontab();
+    const jobs = parseCronJobs(crontabContent);
+
+    if (idx < 0 || idx >= jobs.length) {
+      return res.status(404).json({ error: 'Cron job not found' });
+    }
+    if (jobs[idx].managed === false) {
+      return res.status(403).json({ error: 'Cannot delete external cron jobs from this UI' });
+    }
+
+    jobs.splice(idx, 1);
+
+    const newCrontab = buildCrontabWithJobs(crontabContent, jobs);
+    writeCrontab(newCrontab);
+    res.json({ success: true, jobs });
+  } catch (error) {
+    console.error('Error deleting cron job:', error);
+    res.status(500).json({ error: 'Failed to delete cron job', details: error.message });
   }
 });
 
