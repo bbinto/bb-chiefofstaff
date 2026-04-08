@@ -928,6 +928,8 @@ export class AgentRunner {
               } else {
                 // Use MCP client for other tools
                 toolResult = await this.mcpClient.callTool(toolUse.name, toolUse.input);
+                // Filter RSS results by date range at the harness level so the LLM never sees out-of-range articles
+                toolResult = this.filterRssToolResult(toolResult, toolUse.name);
               }
 
               // Summarize large tool results to reduce token usage
@@ -1464,6 +1466,53 @@ ${(() => {
 **Current Date/Time**: Today is ${todayISO}. The current date and time information is already provided here - DO NOT call any date/time retrieval tools (like get_current_time or similar).
 **Current ISO Calendar Week**: Week ${currentISOWeek} of ${today.getFullYear()} (use this when looking for OneNote weekly pages, e.g., "Week ${currentISOWeek}" or "Week ${currentISOWeek}, ${today.getFullYear()}").
 **Analysis Period**: Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date range (period) from ${startDateISO} to ${endDateISO} (includes both start and end dates). When querying data sources, use parameters like after: "${startDateISO}" (inclusive) and before: "${endDateISO}" or onOrBefore: "${endDateISO}" (depending on API) to query data within this period.${threeDaysAgoISO ? ` For "last 3 days", use "${threeDaysAgoISO}".` : ''}`;
+  }
+
+  /**
+   * Filter RSS get_feed results by the agent's configured date range.
+   * Called immediately after each MCP tool result so the LLM never sees out-of-range articles.
+   * Only applies when toolName === 'get_feed' and this.dateRange is set.
+   */
+  filterRssToolResult(toolResult, toolName) {
+    if (toolName !== 'get_feed') return toolResult;
+    if (!this.dateRange?.startDate || !this.dateRange?.endDate) return toolResult;
+
+    try {
+      // MCP protocol wraps results as { content: [{ type: 'text', text: '<json>' }] }
+      const textBlock = toolResult?.content?.[0];
+      if (!textBlock || textBlock.type !== 'text' || typeof textBlock.text !== 'string') return toolResult;
+
+      // If the tool returned an error string, don't try to parse it
+      if (textBlock.text.startsWith('Error')) return toolResult;
+
+      const feedData = JSON.parse(textBlock.text);
+      if (!feedData?.items || !Array.isArray(feedData.items)) return toolResult;
+
+      // Build inclusive date bounds (full days in UTC)
+      const startDate = new Date(this.dateRange.startDate + 'T00:00:00.000Z');
+      const endDate = new Date(this.dateRange.endDate + 'T23:59:59.999Z');
+
+      const before = feedData.items.length;
+      feedData.items = feedData.items.filter(item => {
+        if (!item.pubDate) return false; // no date metadata → exclude (cannot verify range)
+        const pub = new Date(item.pubDate);
+        if (isNaN(pub.getTime())) return false; // unparseable date → exclude
+        return pub >= startDate && pub <= endDate;
+      });
+      const after = feedData.items.length;
+
+      if (before !== after) {
+        console.log(`📅 RSS date filter: removed ${before - after} out-of-range article(s) (keeping ${this.dateRange.startDate} → ${this.dateRange.endDate}), ${after} remain`);
+      }
+
+      return {
+        ...toolResult,
+        content: [{ type: 'text', text: JSON.stringify(feedData) }]
+      };
+    } catch (e) {
+      console.warn(`⚠️  RSS date filter skipped (parse error): ${e.message}`);
+      return toolResult; // return unmodified if anything goes wrong
+    }
   }
 
   /**
