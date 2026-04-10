@@ -262,6 +262,7 @@ function AppContent() {
                 Research & Ask
               </button>
 
+
 <button
                 onClick={() => navigate('/analytics')}
                 className={navLinkClass('/analytics')}

@@ -617,6 +617,17 @@ export class AgentRunner {
         return `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to review before proceeding. The email should match someone in config.team.ovTeamMembers.`;
       },
 
+      'check-podcasts': () => {
+        const kw = p.prompt;
+        if (!kw) {
+          return '\n\n**IMPORTANT: Keywords Required**\nNo keywords were provided. Please specify comma-separated keywords using the --prompt parameter. Example: "AI, product strategy, founder"';
+        }
+        const rangeNote = this.dateRange
+          ? `\n\nDate range to filter episodes: **${this.dateRange.startDate}** to **${this.dateRange.endDate}** (inclusive). Only include episodes whose release_date falls within this range.`
+          : '';
+        return `\n\n**IMPORTANT: Podcast Search Parameters**\nThe keywords to search for are: **${kw}**\nSearch for these keywords (case-insensitive) in each episode's title and description. An episode matches if it contains at least one of the keywords.${rangeNote}`;
+      },
+
       'feature-telemetry-tracking': () => {
         const rawFeature = p.feature;
         const featureKeyTrimmed = typeof rawFeature === 'string' ? rawFeature.trim() : (rawFeature ? String(rawFeature).trim() : '');

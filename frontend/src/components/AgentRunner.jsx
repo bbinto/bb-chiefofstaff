@@ -35,6 +35,7 @@ function AgentRunner({ password, onClose }) {
     { name: 'feature-insights', category: 'Business', displayName: 'FY27 Feature Insights', description: 'Mine Slack, VoC, and Jira for OV/Officevibe feature requests and produce a prioritized FY27 ideas list', lastRun: null },
     { name: 'bi-weekly-team', category: 'Team', displayName: 'Bi-Weekly Team Meeting', description: 'Prepare a short agenda doc for the OV bi-weekly sync: attendance, business health, eng highlights, and discussion topics', requiresParam: 'manualSourcesFolder', lastRun: null },
     { name: 'podcast-digest', category: 'Prep', displayName: 'Podcast Digest', description: 'Critical learning digest from podcast clip notes in OneNote → General section', lastRun: null },
+    { name: 'check-podcasts', category: 'Prep', displayName: 'Check Podcasts', description: 'Search your saved Spotify shows for episodes matching keywords in the selected date range', requiresParam: 'prompt', lastRun: null },
 
   ])
 
@@ -49,7 +50,8 @@ function AgentRunner({ password, onClose }) {
     folder: '',
     email: '',
     week: '',
-    feature: ''
+    feature: '',
+    prompt: ''
   })
   const [releases, setReleases] = useState({}) // config.releases for feature dropdown
   const [teamMembers, setTeamMembers] = useState([]) // team members for slack user analysis
@@ -525,6 +527,7 @@ function AgentRunner({ password, onClose }) {
                       {agent.paramType === 'teamMemberEmail' && 'Select Team Member'}
                       {agent.requiresParam === 'week' && 'Week'}
                       {agent.requiresParam === 'feature' && 'Feature (release)'}
+                      {agent.requiresParam === 'prompt' && 'Keywords'}
                       <span className="text-orange-600 ml-1">*</span>
                     </label>
                     <div className="text-xs text-gray-600 mb-2">
@@ -598,6 +601,7 @@ function AgentRunner({ password, onClose }) {
                           agent.requiresParam === 'folder' ? 'e.g., week1' :
                           agent.requiresParam === 'email' ? 'e.g., user@example.com' :
                           agent.requiresParam === 'week' ? 'e.g., week 1 or week 1 2025' :
+                          agent.requiresParam === 'prompt' ? 'e.g., AI, product strategy, founder stories' :
                           ''
                         }
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"

@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     port: 3000,
     host: '0.0.0.0',
-    allowedHosts: ['hyperconscientious-mel-exhaustingly.ngrok-free.dev', '10.88.111.48', 'bb-cos.ngrok.app'],
+    allowedHosts: [''],
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
