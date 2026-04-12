@@ -14,7 +14,7 @@ function Settings({ password, onBack }) {
   const [llmSettings, setLlmSettings] = useState(null)
   const [llmBackend, setLlmBackend] = useState('claude') // 'claude' | 'ollama' | 'gemini'
   const [ollamaModel, setOllamaModel] = useState('deepseek-v3.1:671b-cloud')
-  const [claudeModel, setClaudeModel] = useState('claude-sonnet-4-5-20250929')
+  const [claudeModel, setClaudeModel] = useState('claude-sonnet-4-6')
   const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash')
   
   // Config state
@@ -179,7 +179,7 @@ function Settings({ password, onBack }) {
         setLlmBackend('claude')
       }
       setOllamaModel(data.ollamaModel || 'mistral')
-      setClaudeModel(data.claudeModel || 'claude-sonnet-4-5-20250929')
+      setClaudeModel(data.claudeModel || 'claude-sonnet-4-6')
       setGeminiModel(data.geminiModel || 'gemini-2.5-flash')
       setError(null)
     } catch (err) {

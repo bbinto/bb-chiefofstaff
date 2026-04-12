@@ -5,7 +5,7 @@
 
 // API and Model Configuration
 export const API_DEFAULTS = {
-  MODEL: 'claude-sonnet-4-5-20250929',
+  MODEL: 'claude-sonnet-4-6',
   MAX_TOKENS: 8000, // Conservative limit for compatibility
 };
 
@@ -23,10 +23,12 @@ export const TOKEN_LIMITS = {
   TOOL_OVERHEAD_PER_TOOL: 100, // Estimated tokens per tool in schema
 };
 
-// Pricing (Claude Sonnet 4.5)
+// Pricing (Claude Sonnet 4.6) — see https://anthropic.com/pricing for current rates
 export const PRICING = {
-  INPUT_TOKENS_PER_MILLION: 3.00,  // $3 per 1M input tokens
+  INPUT_TOKENS_PER_MILLION: 3.00,   // $3 per 1M input tokens
   OUTPUT_TOKENS_PER_MILLION: 15.00, // $15 per 1M output tokens
+  CACHE_WRITE_PER_MILLION: 3.75,    // $3.75 per 1M tokens written to cache
+  CACHE_READ_PER_MILLION: 0.30,     // $0.30 per 1M tokens read from cache (90% savings vs input)
 };
 
 // Environmental Impact (Carbon Footprint)

@@ -140,7 +140,7 @@ let llmSettings = {
   ollamaModel: _persisted?.ollamaModel ?? (process.env.OLLAMA_MODEL || 'mistral'),
   ollamaBaseUrl: _persisted?.ollamaBaseUrl ?? 'http://localhost:11434',
   ollamaApiKey: _persisted?.ollamaApiKey ?? (process.env.OLLAMA_API_KEY || ''),
-  claudeModel: _persisted?.claudeModel ?? (process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929'),
+  claudeModel: _persisted?.claudeModel ?? (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6'),
   geminiModel: _persisted?.geminiModel ?? (process.env.GEMINI_MODEL || 'gemini-2.5-flash'),
 };
 
@@ -222,18 +222,26 @@ async function generateLightReportWithClaude({ system, user }) {
     throw new Error('ANTHROPIC_API_KEY is not set. Configure Claude API key or switch to Ollama in Settings.');
   }
 
+  const claudeModel = llmSettings.claudeModel || 'claude-haiku-4-5-20251001';
+  // claude-3-haiku doesn't support the array system message format needed for caching
+  const modelSupportsCaching = !claudeModel.startsWith('claude-3-haiku');
+  const systemPayload = modelSupportsCaching
+    ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+    : system;
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'prompt-caching-2024-07-31',
       'x-api-key': ANTHROPIC_API_KEY
     },
     body: JSON.stringify({
-      model: llmSettings.claudeModel || 'claude-sonnet-4-5-20250929',
+      model: claudeModel,
       max_tokens: 3000,
       temperature: 0.2,
-      system,
+      system: systemPayload,
       messages: [{ role: 'user', content: user }]
     })
   });
@@ -2524,18 +2532,24 @@ app.post('/api/llm-eval/run', async (req, res) => {
       const apiKey = ANTHROPIC_API_KEY;
       if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
 
+      const modelSupportsCaching = !model.startsWith('claude-3-haiku');
       const body = {
         model,
         max_tokens: 2048,
         messages: [{ role: 'user', content: prompt }]
       };
-      if (systemPrompt) body.system = systemPrompt;
+      if (systemPrompt) {
+        body.system = modelSupportsCaching
+          ? [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }]
+          : systemPrompt;
+      }
 
       const r = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'anthropic-version': '2023-06-01',
+          'anthropic-beta': 'prompt-caching-2024-07-31',
           'x-api-key': apiKey
         },
         body: JSON.stringify(body)

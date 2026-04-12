@@ -2,11 +2,10 @@
 // Used by Settings.jsx (dropdowns) and LLMEvaluator.jsx (selection grid).
 
 export const CLAUDE_MODELS = [
-  { value: 'claude-opus-4-6',          label: 'Claude Opus 4.6',         tag: 'Arena #1 Text' },
-  { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1',          tag: 'Most capable' },
-  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5',      tag: 'Recommended' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5',        tag: 'Fast' },
-  { value: 'claude-3-haiku-20240307',  label: 'Claude 3 Haiku',           tag: 'Budget' },
+  { value: 'claude-opus-4-6',           label: 'Claude Opus 4.6',    tag: 'Most capable' },
+  { value: 'claude-sonnet-4-6',         label: 'Claude Sonnet 4.6',  tag: 'Recommended' },
+  { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5',   tag: 'Best value' },
+  { value: 'claude-3-haiku-20240307',   label: 'Claude 3 Haiku',     tag: 'Budget' },
 ]
 
 export const GEMINI_MODELS = [

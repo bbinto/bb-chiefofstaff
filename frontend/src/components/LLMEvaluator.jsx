@@ -86,7 +86,7 @@ ResultCard.propTypes = {
 }
 
 export default function LLMEvaluator({ password }) {
-  const [selectedModels, setSelectedModels] = useState(['claude/claude-sonnet-4-5-20250929'])
+  const [selectedModels, setSelectedModels] = useState(['claude/claude-sonnet-4-6'])
   const [prompt, setPrompt] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
   const [showSystem, setShowSystem] = useState(false)
