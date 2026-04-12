@@ -1,80 +1,367 @@
 {
+  "md2podcastPath": "/path/to/md-to-podcast/md2podcast.py",
   "team": {
     "ovTeamMembers": [
       {
-        "name": "John Doe",
+        "name": "Jane Smith",
         "slackId": "U01234567AB",
-        "email": "john.doe@example.com",
-        "role": "Sr PM"
+        "email": "jane.smith@yourcompany.com",
+        "role": "PM"
       },
       {
-        "name": "Jane Smith",
+        "name": "John Doe",
         "slackId": "U09876543CD",
-        "email": "jane.smith@example.com",
+        "email": "john.doe@yourcompany.com",
+        "role": "PM"
+      },
+      {
+        "name": "Alex Johnson",
+        "slackId": "U08XXXXXXX",
+        "email": "alex.johnson@yourcompany.com",
         "role": "Sr PM"
       }
     ],
-    "pmEmailAddresses": [
-      "john.doe@example.com",
-      "jane.smith@example.com"
+    "OVEntireTeam": [
+      "Alice Anderson",
+      "Bob Baker",
+      "Carol Clark",
+      "David Davis",
+      "Eve Evans",
+      "Frank Foster",
+      "Grace Green",
+      "Henry Hall",
+      "Iris Irving",
+      "Jack Jones"
     ],
-    "jiraTeams": ["Team Alpha", "Team Beta", "Team Gamma", "Team Delta"]
+    "jiraTeams": [
+      "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb",
+      "cccccccc-4444-5555-6666-dddddddddddd",
+      "eeeeeeee-7777-8888-9999-ffffffffffff"
+    ],
+    "jiraProducts": [
+      "YourProduct"
+    ],
+    "1-1-channelsTopics": [
+      "C01234567AB",
+      "C09876543CD",
+      "C0ABCDEF123"
+    ],
+    "1-1s": [
+      {
+        "name": "Sam Taylor",
+        "slackId": "U01234567AB",
+        "slackDMs": "D01234567AB",
+        "email": "sam.taylor@yourcompany.com",
+        "role": "EM - Platform",
+        "relationship": "peer"
+      },
+      {
+        "name": "Morgan Lee",
+        "slackId": "U09876543CD",
+        "slackDMs": "",
+        "email": "morgan.lee@yourcompany.com",
+        "role": "EM - Growth",
+        "relationship": "peer"
+      },
+      {
+        "name": "Jordan Park",
+        "slackId": "U0ABCDEF123",
+        "slackDMs": "D0ABCDEF123",
+        "email": "jordan.park@yourcompany.com",
+        "role": "SVP Marketing",
+        "relationship": "peer"
+      },
+      {
+        "name": "Casey Rivera",
+        "slackId": "U0GHIJKL456",
+        "slackDMs": "",
+        "email": "casey.rivera@yourcompany.com",
+        "role": "CFO",
+        "relationship": "stakeholder"
+      },
+      {
+        "name": "Riley Chen",
+        "slackId": "U0MNOPQR789",
+        "slackDMs": "D0MNOPQR789",
+        "email": "riley.chen@yourcompany.com",
+        "role": "CPO",
+        "relationship": "boss"
+      }
+    ]
   },
   "slack": {
     "channels": {
       "teamChannels": [
         "C01234567AB",
         "C09876543CD",
-        "C0ABCDEF123"
+        "C0ABCDEF123",
+        "C0GHIJKL456",
+        "C0MNOPQR789"
       ],
-      "productGeneral": "C01234567AB",
-      "productFeedback": ["C01234567AB", "C01234567AB"],
+      "performanceChannels": [
+        ""
+      ],
+      "telemetryChannels": [
+        "C0TELEMETRY1"
+      ],
+      "productGeneral": [
+        "C0PRODGENRL1",
+        ""
+      ],
+      "productFeedback": [
+        "C0PRODFDBK1"
+      ],
       "csmChannels": [
-        "C0XYZ789ABC",
-        "C01234567AB"
+        "C0CSMCHANNEL1",
+        "C0CSMCHANNEL2"
       ],
       "salesChannels": [
-        "CHANNEL_ID_FOR_SALES"
+        "C0SALESCHAN1",
+        "C0SALESCHAN2",
+        "C0SALESCHAN3"
+      ],
+      "HRCompetition": [
+        "C0HRCOMPCHAN1"
       ]
     },
-    "myslackuserId": "U0EXAMPLE123"
+    "myslackuserId": "U0MYUSERIDXX"
   },
   "calendar": {
-    "name": "Example Company"
+    "name": [
+      "yourcompany",
+      "OOO-YourCompany"
+    ]
   },
   "jira": {
-    "ovOkrBoardId": "12345678",
-    "ovOkrBoardUrl": "https://",
-    "aiOkrBoardId": "87654321",
-    "aiOkrBoardUrl": "https://",
-    "projectKey": "PROJ"
+    "ovOkrBoardId": "1234567",
+    "ovOkrBoardUrl": "https://yourcompany.atlassian.net/jira/polaris/projects/PROJ/ideas/view/1234567",
+    "aiOkrBoardId": "7654321",
+    "aiOkrBoardUrl": "https://yourcompany.atlassian.net/jira/polaris/projects/PROJ/ideas/view/7654321",
+    "OVTechDebtKanbanUrl": "https://yourcompany.atlassian.net/jira/software/c/projects/PROJ/boards/1234",
+    "projectKey": "PROJ",
+    "OVprojectKey": "EP",
+    "filters": {
+      "H2_Jira_Discovery_Ideas": {
+        "filterId": "11111",
+        "filterUrl": "https://yourcompany.atlassian.net/issues/?filter=11111",
+        "description": "H2 Jira discovery ideas filter"
+      },
+      "Production_Bugs": {
+        "filterId": "22222",
+        "filterUrl": "https://yourcompany.atlassian.net/issues/?filter=22222",
+        "description": "Production bugs filter"
+      },
+      "My_Initiatives": {
+        "filterId": "33333",
+        "filterUrl": "https://yourcompany.atlassian.net/issues/?filter=33333",
+        "description": "My accountability on team goals"
+      }
+    }
   },
   "confluence": {
+    "OVSpace": "https://yourcompany.atlassian.net/wiki/spaces/PROJ/overview?homepageId=12345",
+    "OVPRDs": "https://yourcompany.atlassian.net/wiki/spaces/PROJ/folder/123456789",
     "vocPageId": "1234567890",
-    "spaceKey": "EXAMPLE"
+    "vocPageURL": "https://yourcompany.atlassian.net/wiki/spaces/GTM/folder/1234567890",
+    "spaceKey": "PROJ"
   },
-  "hubspot": {
-    "productFilter": "ExampleProduct"
+  "FeatureInsights": {
+    "SlackChannel": [
+      "C0FEATURE001",
+      "C0FEATURE002"
+    ],
+    "VoC": [
+      "https://yourcompany.atlassian.net/wiki/spaces/GTM/pages/1234567/JANUARY+2026+VOC+FEEDBACK",
+      "https://yourcompany.atlassian.net/wiki/spaces/GTM/pages/2345678/FEBRUARY+2026+VOC+FEEDBACK"
+    ],
+    "JiraBacklog": [
+      "https://yourcompany.atlassian.net/jira/polaris/projects/PROJ/ideas/view/1234567"
+    ]
   },
   "mixpanel": {
-    "projectId": "your_mixpanel_project_id"
+    "projectId": "123456",
+    "workspaceId": "1234567",
+    "pwd": "YOUR_MIXPANEL_SERVICE_ACCOUNT_PASSWORD",
+    "username": "your-name-mcp.xxxxxx.mp-service-account"
+  },
+  "mixpanel-insights": {
+    "customSurveys": [
+      "11111111",
+      "22222222",
+      "33333333",
+      "44444444"
+    ],
+    "others": [
+      "55555555",
+      "66666666",
+      "77777777"
+    ],
+    "specificNetwork": [
+      "88888888",
+      "99999999",
+      "10101010"
+    ],
+    "mau": [
+      "11223344"
+    ],
+    "wau": [
+      "55667788"
+    ]
   },
   "gong": {
     "enabled": true
   },
+  "hubspot": {
+    "accessToken": "pat-na1-YOUR-HUBSPOT-ACCESS-TOKEN",
+    "clientSecret": "YOUR-HUBSPOT-CLIENT-SECRET-UUID"
+  },
   "thoughtleadership": {
     "rssFeeds": [
-      "https://www.mindtheproduct.com/feed/"
+      "https://www.mindtheproduct.com/feed/",
+      "https://newsletter.pragmaticengineer.com/feed",
+      "https://www.lennysnewsletter.com/feed/",
+      "https://andrewchen.substack.com/feed",
+      "https://www.bigtechnology.com/feed"
+    ],
+    "AICritics": [
+      "https://yoshuabengio.org/feed/",
+      "https://learningforsustainability.net/feed"
     ],
     "webSources": [
-      "https://www.mindtheproduct.com"
-
+      "https://www.reforge.com/blog"
     ],
     "industryNewsSources": [
-      "https://stratechery.com"
-    ]
+      "https://www.linkedin.com/newsletters/your-newsletter-id"
+    ],
+    "hrNewsRSS": [
+      "http://feeds.harvardbusiness.org/harvardbusiness/"
+    ],
+    "redditSources": {
+      "topPosts": 3,
+      "subreddits": [
+        {
+          "name": "r/ProductManagement",
+          "reason": "Product management discussions and frameworks"
+        },
+        {
+          "name": "r/SaaS",
+          "reason": "SaaS business strategy and market trends"
+        },
+        {
+          "name": "r/artificial",
+          "reason": "Broad AI industry news and trends"
+        }
+      ]
+    },
+    "nyTimes": {
+      "sections": [
+        "technology"
+      ],
+      "topArticlesCount": 3,
+      "filterTopics": [
+        "technology",
+        "artificial intelligence",
+        "AI",
+        "machine learning",
+        "software",
+        "robotics",
+        "automation"
+      ]
+    },
+    "theAtlantic": {
+      "topArticlesCount": 3,
+      "filterTopics": [
+        "technology",
+        "artificial intelligence",
+        "AI",
+        "society",
+        "culture",
+        "politics",
+        "science",
+        "future"
+      ]
+    }
   },
   "settings": {
-    "defaultDays": 7
+    "defaultDays": 4,
+    "FY2026StartDate": "2025-04-01",
+    "FY2026EndDate": "2026-03-31",
+    "FY2026Q3StartDate": "2025-10-01",
+    "FY2026Q3EndDate": "2025-12-31",
+    "FY2026Q4StartDate": "2026-01-01",
+    "FY2026Q4EndDate": "2026-03-31",
+    "FY2027Q1StartDate": "2026-04-01",
+    "FY2027Q1EndDate": "2026-06-30",
+    "FY2027Q2StartDate": "2026-07-01",
+    "FY20267Q2EndDate": "2026-09-30"
+  },
+  "releases": {
+    "example_feature_one": {
+      "name": "Example Feature One",
+      "description": "",
+      "date": "2025-07-01",
+      "type": "major",
+      "telemetry": "https://mixpanel.com/s/EXAMPLE1"
+    },
+    "example_feature_two": {
+      "name": "Example Feature Two",
+      "description": "",
+      "date": "2025-08-15",
+      "type": "major",
+      "telemetry": [
+        "11111111",
+        "22222222"
+      ]
+    },
+    "example_minor_release": {
+      "name": "Example Minor Release",
+      "description": "",
+      "date": "2025-09-01",
+      "type": "minor",
+      "telemetry": ""
+    }
+  },
+  "mcp": {
+    "health": {
+      "servers": [],
+      "description": "Health-related MCP servers removed or not configured"
+    },
+    "work": {
+      "servers": [
+        "Slack",
+        "onenote",
+        "google-calendar",
+        "RSS-MCP",
+        "reddit",
+        "nytimes",
+        "theatlantic",
+        "Read-Website-Fast"
+      ],
+      "description": "Work-related MCP servers for business and team operations"
+    }
+  },
+  "gemini": {
+    "maxTools": 20,
+    "priorityServers": [
+      "reddit",
+      "rss",
+      "nytimes",
+      "theatlantic",
+      "slack",
+      "google-calendar",
+      "onenote"
+    ],
+    "description": "Gemini tool limit config. priorityServers are placed first when the tool list is capped — list the MCPs most important for your Gemini agents here."
+  },
+  "ollama": {
+    "maxTools": 20,
+    "priorityServers": [
+      "slack",
+      "google-calendar",
+      "onenote",
+      "nytimes",
+      "rss"
+    ],
+    "description": "Ollama tool limit config. priorityServers are placed first when the tool list is capped — list the MCPs most important for your Gemini agents here."
   }
 }

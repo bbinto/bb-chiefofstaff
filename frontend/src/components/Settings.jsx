@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
 import LLMEvaluator from './LLMEvaluator'
+import Upload from './Upload'
 import { CLAUDE_MODELS, GEMINI_MODELS, OLLAMA_CLOUD_MODELS, OLLAMA_LOCAL_MODELS } from '../llmModels'
 
 // Get API URL from environment variable, fallback to relative URL
@@ -21,7 +22,16 @@ function Settings({ password, onBack }) {
   const [editedConfig, setEditedConfig] = useState('')
   const [isEditingConfig, setIsEditingConfig] = useState(false)
   const [expandedSections, setExpandedSections] = useState({})
-  
+
+  // Scheduled Agents state
+  const [cronJobs, setCronJobs] = useState([])
+  const [agentDefinitions, setAgentDefinitions] = useState([])
+  const [cronForm, setCronForm] = useState({ agentName: '', minute: '0', hour: '8', dayOfWeek: '*', dayOfMonth: '*', month: '*' })
+  const [editingCronIdx, setEditingCronIdx] = useState(null)
+  const [showCronForm, setShowCronForm] = useState(false)
+  const [cronError, setCronError] = useState(null)
+  const [cronSaving, setCronSaving] = useState(false)
+
   // Shared state
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -37,9 +47,112 @@ function Settings({ password, onBack }) {
       fetchSettings()
     } else if (activeTab === 'config') {
       fetchConfig()
+    } else if (activeTab === 'schedule') {
+      fetchCronJobs()
+      fetchAgentDefinitions()
     }
-    // 'evaluator' tab loads its own data internally
+    // 'evaluator' and 'upload' tabs load their own data internally
   }, [activeTab])
+
+  const fetchCronJobs = async () => {
+    try {
+      setLoading(true)
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/settings/cron-jobs`, { headers })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setCronJobs(data)
+      setCronError(null)
+    } catch (err) {
+      setCronError(`Failed to load scheduled agents: ${err.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchAgentDefinitions = async () => {
+    try {
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/agent-definitions`, { headers })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setAgentDefinitions(data)
+    } catch {
+      // Non-critical — fall back to empty list
+    }
+  }
+
+  const cronScheduleString = (form) =>
+    `${form.minute} ${form.hour} ${form.dayOfMonth} ${form.month} ${form.dayOfWeek}`
+
+  const parseCronSchedule = (schedule) => {
+    const parts = schedule.split(/\s+/)
+    if (parts.length < 5) return { minute: '0', hour: '8', dayOfMonth: '*', month: '*', dayOfWeek: '*' }
+    return { minute: parts[0], hour: parts[1], dayOfMonth: parts[2], month: parts[3], dayOfWeek: parts[4] }
+  }
+
+  const saveCronJob = async () => {
+    if (!cronForm.agentName) { setCronError('Please select an agent.'); return }
+    setCronSaving(true)
+    setCronError(null)
+    try {
+      const headers = { 'Content-Type': 'application/json', ...(password ? { 'x-app-password': password } : {}) }
+      const schedule = cronScheduleString(cronForm)
+      let response
+      if (editingCronIdx !== null) {
+        response = await fetch(`${API_URL}/api/settings/cron-jobs/${editingCronIdx}`, {
+          method: 'PUT', headers, body: JSON.stringify({ agentName: cronForm.agentName, schedule })
+        })
+      } else {
+        response = await fetch(`${API_URL}/api/settings/cron-jobs`, {
+          method: 'POST', headers, body: JSON.stringify({ agentName: cronForm.agentName, schedule })
+        })
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setCronJobs(data.jobs)
+      setShowCronForm(false)
+      setEditingCronIdx(null)
+      setCronForm({ agentName: '', minute: '0', hour: '8', dayOfWeek: '*', dayOfMonth: '*', month: '*' })
+    } catch (err) {
+      setCronError(`Failed to save: ${err.message}`)
+    } finally {
+      setCronSaving(false)
+    }
+  }
+
+  const deleteCronJob = async (idx) => {
+    if (!window.confirm('Remove this scheduled agent?')) return
+    try {
+      const headers = password ? { 'x-app-password': password } : {}
+      const response = await fetch(`${API_URL}/api/settings/cron-jobs/${idx}`, { method: 'DELETE', headers })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setCronJobs(data.jobs)
+    } catch (err) {
+      setCronError(`Failed to delete: ${err.message}`)
+    }
+  }
+
+  const startEditCron = (idx) => {
+    const job = cronJobs[idx]
+    const parsed = parseCronSchedule(job.schedule)
+    setCronForm({ agentName: job.agentName, ...parsed })
+    setEditingCronIdx(idx)
+    setShowCronForm(true)
+    setCronError(null)
+  }
+
+  const humanReadableCron = (schedule) => {
+    const parts = schedule.split(/\s+/)
+    if (parts.length < 5) return schedule
+    const [min, hr, dom, , dow] = parts
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const dayLabel = dow === '*' ? 'every day' : dow.split(',').map(d => days[parseInt(d)] || d).join(', ')
+    const timeLabel = `${hr.padStart(2, '0')}:${min.padStart(2, '0')}`
+    const domLabel = dom === '*' ? '' : ` on day ${dom}`
+    return `${timeLabel}${domLabel} — ${dayLabel}`
+  }
 
   const fetchSettings = async () => {
     try {
@@ -265,9 +378,29 @@ function Settings({ password, onBack }) {
         >
           ⚙️ App Configuration
         </button>
+        <button
+          onClick={() => setActiveTab('upload')}
+          className={`px-6 py-3 font-semibold transition-colors ${
+            activeTab === 'upload'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          📤 Upload
+        </button>
+        <button
+          onClick={() => setActiveTab('schedule')}
+          className={`px-6 py-3 font-semibold transition-colors ${
+            activeTab === 'schedule'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          ⏰ Scheduled Agents
+        </button>
       </div>
 
-      {loading && activeTab !== 'evaluator' ? (
+      {loading && activeTab !== 'evaluator' && activeTab !== 'upload' && activeTab !== 'schedule' ? (
         <div className="text-center py-12">
           <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full"></div>
           <p className="mt-4 text-gray-600">Loading settings...</p>
@@ -505,7 +638,7 @@ function Settings({ password, onBack }) {
         <div className="max-w-6xl">
           <LLMEvaluator password={password} />
         </div>
-      ) : (
+      ) : activeTab === 'config' ? (
         // Config Tab Content
         <div className="max-w-4xl space-y-6">
           {config && (
@@ -585,7 +718,181 @@ function Settings({ password, onBack }) {
             </>
           )}
         </div>
-      )}
+      ) : activeTab === 'upload' ? (
+        <Upload password={password} onBack={() => setActiveTab('llm')} />
+      ) : activeTab === 'schedule' ? (
+        <div className="max-w-3xl space-y-6">
+          {cronError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">{cronError}</div>
+          )}
+
+          {/* Existing cron jobs */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Scheduled Agents</h2>
+                <p className="text-sm text-gray-500 mt-1">Agent runs are managed via crontab. All times are server local time.</p>
+              </div>
+              <button
+                onClick={() => { setShowCronForm(true); setEditingCronIdx(null); setCronForm({ agentName: '', minute: '0', hour: '8', dayOfWeek: '*', dayOfMonth: '*', month: '*' }); setCronError(null) }}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+              >
+                + Add Schedule
+              </button>
+            </div>
+
+            {loading ? (
+              <div className="text-center py-8 text-gray-400">Loading...</div>
+            ) : cronJobs.length === 0 ? (
+              <div className="text-center py-8 text-gray-400 text-sm">No scheduled agents yet. Click &quot;+ Add Schedule&quot; to create one.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="text-left py-2 px-3 font-semibold text-gray-600">Agent</th>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-600">Schedule</th>
+                      <th className="text-left py-2 px-3 font-semibold text-gray-600">Cron expression</th>
+                      <th className="py-2 px-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cronJobs.map((job, idx) => (
+                      <tr key={idx} className={`border-b border-gray-50 hover:bg-gray-50 ${!job.managed ? 'opacity-60' : ''}`}>
+                        <td className="py-2 px-3 font-mono text-xs text-blue-700 font-semibold">
+                          {job.agentName || <span className="text-gray-400 italic">external</span>}
+                        </td>
+                        <td className="py-2 px-3 text-gray-700">{humanReadableCron(job.schedule)}</td>
+                        <td className="py-2 px-3 font-mono text-xs text-gray-400 max-w-xs truncate" title={job.command}>{job.schedule}</td>
+                        <td className="py-2 px-3 text-right whitespace-nowrap">
+                          {job.managed ? (
+                            <>
+                              <button
+                                onClick={() => startEditCron(idx)}
+                                className="text-blue-600 hover:text-blue-800 font-medium mr-3 text-xs"
+                              >Edit</button>
+                              <button
+                                onClick={() => deleteCronJob(idx)}
+                                className="text-red-500 hover:text-red-700 font-medium text-xs"
+                              >Remove</button>
+                            </>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">external — edit via crontab</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Add / Edit form */}
+          {showCronForm && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">
+                {editingCronIdx !== null ? 'Edit Schedule' : 'New Schedule'}
+              </h3>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Agent</label>
+                  <select
+                    value={cronForm.agentName}
+                    onChange={e => setCronForm(f => ({ ...f, agentName: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">— select an agent —</option>
+                    {agentDefinitions.map(a => (
+                      <option key={a} value={a}>{a}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Hour (0–23)</label>
+                    <input
+                      type="text"
+                      value={cronForm.hour}
+                      onChange={e => setCronForm(f => ({ ...f, hour: e.target.value }))}
+                      placeholder="8"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Minute (0–59)</label>
+                    <input
+                      type="text"
+                      value={cronForm.minute}
+                      onChange={e => setCronForm(f => ({ ...f, minute: e.target.value }))}
+                      placeholder="0"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Day of week</label>
+                    <select
+                      value={cronForm.dayOfWeek}
+                      onChange={e => setCronForm(f => ({ ...f, dayOfWeek: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="*">Every day</option>
+                      <option value="1-5">Weekdays (Mon–Fri)</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5">Friday</option>
+                      <option value="6">Saturday</option>
+                      <option value="0">Sunday</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Day of month</label>
+                    <input
+                      type="text"
+                      value={cronForm.dayOfMonth}
+                      onChange={e => setCronForm(f => ({ ...f, dayOfMonth: e.target.value }))}
+                      placeholder="* (every day)"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                  <span className="text-gray-500">Preview: </span>
+                  <span className="font-mono text-gray-800">{cronScheduleString(cronForm)}</span>
+                  <span className="ml-3 text-gray-600">→ {humanReadableCron(cronScheduleString(cronForm))}</span>
+                </div>
+              </div>
+
+              <div className="mt-6 flex items-center gap-3">
+                <button
+                  onClick={saveCronJob}
+                  disabled={cronSaving}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
+                >
+                  {cronSaving ? 'Saving...' : editingCronIdx !== null ? 'Update Schedule' : 'Save Schedule'}
+                </button>
+                <button
+                  onClick={() => { setShowCronForm(false); setEditingCronIdx(null); setCronError(null) }}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-900 text-sm font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-xs text-gray-500">
+            <strong>How it works:</strong> Schedules are written to your system crontab. The agent runs using
+            <span className="font-mono mx-1">node src/index.js &lt;agent&gt;</span> from the project root.
+            Logs are saved to <span className="font-mono">logs/cron-&lt;agent&gt;.log</span>.
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

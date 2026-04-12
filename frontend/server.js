@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import multer from 'multer';
 import { extractOneLineSummary, extractInsights } from '../src/utils/summary-extractor.js';
 import { FRONTEND, PATHS } from '../src/utils/constants.js';
@@ -62,6 +63,56 @@ const GOOGLE_GEMINI_API_KEY = process.env.GOOGLE_GEMINI_API_KEY || null;
 
 // LLM Settings - persisted to disk and loaded on startup
 const LLM_SETTINGS_PATH = path.join(__dirname, '..', 'llm-settings.json');
+
+// Notifications Settings - persisted to disk
+const NOTIFICATIONS_SETTINGS_PATH = path.join(__dirname, '..', 'notifications-settings.json');
+
+function loadNotificationsSettings() {
+  if (fs.existsSync(NOTIFICATIONS_SETTINGS_PATH)) {
+    try {
+      return JSON.parse(fs.readFileSync(NOTIFICATIONS_SETTINGS_PATH, 'utf-8'));
+    } catch {
+      console.warn('[Notifications] Failed to parse notifications-settings.json');
+    }
+  }
+  return null;
+}
+
+function saveNotificationsSettings(settings) {
+  try {
+    fs.writeFileSync(NOTIFICATIONS_SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('[Notifications] Failed to save notifications-settings.json:', err.message);
+  }
+}
+
+const _persistedNotifications = loadNotificationsSettings();
+let notificationsSettings = {
+  smsEnabled: _persistedNotifications?.smsEnabled ?? false,
+  phoneNumber: _persistedNotifications?.phoneNumber ?? '',
+};
+
+async function sendSmsNotification(agentNames, status) {
+  if (!notificationsSettings.smsEnabled || !notificationsSettings.phoneNumber) return;
+  const agentList = Array.isArray(agentNames) ? agentNames.join(', ') : agentNames;
+  const statusEmoji = status === 'completed' ? '✅' : '❌';
+  const message = `${statusEmoji} Chief of Staff: ${agentList} report ${status}.`;
+  try {
+    const response = await fetch('https://textbelt.com/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: notificationsSettings.phoneNumber, message, key: process.env.TEXTBELT_KEY || 'textbelt' }),
+    });
+    const result = await response.json();
+    if (result.success) {
+      console.log(`[SMS] Sent notification to ${notificationsSettings.phoneNumber}`);
+    } else {
+      console.warn(`[SMS] Failed to send notification: ${result.error}`);
+    }
+  } catch (err) {
+    console.error(`[SMS] Error sending notification: ${err.message}`);
+  }
+}
 
 function loadPersistedLLMSettings() {
   if (fs.existsSync(LLM_SETTINGS_PATH)) {
@@ -366,7 +417,7 @@ if (process.env.VERCEL === '1') {
 }
 
 // Path to reports folder - use frontend/reports for Vercel, fallback to parent for local
-const REPORTS_DIR = process.env.VERCEL === '1' 
+const REPORTS_DIR = process.env.VERCEL === '1'
   ? path.join(__dirname, 'reports')
   : path.join(__dirname, '..', PATHS.REPORTS_DIR);
 
@@ -1050,6 +1101,248 @@ app.get('/api/agents', (req, res) => {
   }
 });
 
+// Get schedulable agent names (from agents directory, not reports)
+app.get('/api/agent-definitions', (req, res) => {
+  try {
+    const agentsDir = path.join(__dirname, '..', PATHS.AGENTS_DIR);
+    if (!fs.existsSync(agentsDir)) {
+      return res.json([]);
+    }
+    const files = fs.readdirSync(agentsDir)
+      .filter(f => f.endsWith('.md') && !f.includes('/'))
+      .map(f => f.replace('.md', ''))
+      .sort();
+    res.json(files);
+  } catch (error) {
+    console.error('Error reading agent definitions:', error);
+    res.status(500).json({ error: 'Failed to read agent definitions', details: error.message });
+  }
+});
+
+// ─── Skills ────────────────────────────────────────────────────────────────
+
+const SKILLS_DIR = process.env.VERCEL === '1'
+  ? path.join(__dirname, 'skills')
+  : path.join(__dirname, '..', 'skills');
+
+/**
+ * Minimal YAML parser for skill files.
+ * Handles: scalar strings, block scalars (|), and simple sequences (- key: value).
+ */
+function parseSkillYaml(content) {
+  const lines = content.split('\n');
+  const result = {};
+  let i = 0;
+
+  function readBlockScalar(baseIndent) {
+    const chunks = [];
+    while (i < lines.length) {
+      const line = lines[i];
+      if (line.trim() === '' || (line.match(/^(\s+)/) && line.match(/^(\s+)/)[1].length > baseIndent)) {
+        chunks.push(line.trimEnd());
+        i++;
+      } else if (line.trim() === '') {
+        chunks.push('');
+        i++;
+      } else {
+        break;
+      }
+    }
+    // Trim leading indent from each line
+    const minIndent = chunks.filter(l => l.trim()).reduce((min, l) => {
+      const m = l.match(/^(\s*)/);
+      return Math.min(min, m ? m[1].length : min);
+    }, Infinity);
+    return chunks.map(l => l.slice(minIndent === Infinity ? 0 : minIndent)).join('\n').trim();
+  }
+
+  function readSequence(baseIndent) {
+    const items = [];
+    while (i < lines.length) {
+      const line = lines[i];
+      const indentMatch = line.match(/^(\s*)-\s+/);
+      if (!indentMatch || indentMatch[1].length < baseIndent) break;
+      // Collect all key:value pairs under this list item
+      const item = {};
+      // First line may be "- key: value"
+      const firstKv = line.replace(/^\s*-\s+/, '').trim();
+      const kvMatch = firstKv.match(/^(\w+):\s*(.*)$/);
+      if (kvMatch) item[kvMatch[1]] = kvMatch[2].replace(/^["']|["']$/g, '');
+      i++;
+      // Continuation lines (deeper indent, no dash)
+      while (i < lines.length) {
+        const next = lines[i];
+        const nextIndent = next.match(/^(\s*)/)[1].length;
+        if (next.trim() === '' || nextIndent <= indentMatch[1].length) break;
+        // Sub-key: value pairs under list item
+        const subKv = next.trim().match(/^(\w+):\s*(.*)$/);
+        if (subKv) {
+          let val = subKv[2].replace(/^["']|["']$/g, '');
+          // Check for nested sequence (options)
+          if (val === '') {
+            i++;
+            const subItems = [];
+            while (i < lines.length) {
+              const optLine = lines[i];
+              const optIndent = optLine.match(/^(\s*)/)[1].length;
+              if (!optLine.trim().startsWith('-') || optIndent <= nextIndent) break;
+              const optItem = {};
+              const optFirst = optLine.replace(/^\s*-\s+/, '').trim();
+              const optKv = optFirst.match(/^(\w+):\s*(.*)$/);
+              if (optKv) optItem[optKv[1]] = optKv[2].replace(/^["']|["']$/g, '');
+              i++;
+              while (i < lines.length) {
+                const optNext = lines[i];
+                const optNextIndent = optNext.match(/^(\s*)/)[1].length;
+                if (optNext.trim() === '' || optNextIndent <= optIndent + 1) break;
+                const optSubKv = optNext.trim().match(/^(\w+):\s*(.*)$/);
+                if (optSubKv) optItem[optSubKv[1]] = optSubKv[2].replace(/^["']|["']$/g, '');
+                i++;
+              }
+              subItems.push(optItem);
+            }
+            item[subKv[1]] = subItems;
+            continue;
+          }
+          item[subKv[1]] = val;
+        }
+        i++;
+      }
+      items.push(item);
+    }
+    return items;
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim() || line.trim().startsWith('#')) { i++; continue; }
+
+    const topKv = line.match(/^(\w+):\s*(.*)$/);
+    if (!topKv) { i++; continue; }
+
+    const key = topKv[1];
+    const rawVal = topKv[2].trim();
+    i++;
+
+    if (rawVal === '|') {
+      // Block scalar
+      result[key] = readBlockScalar(0);
+    } else if (rawVal === '') {
+      // Could be a sequence
+      const saved = i;
+      const seq = readSequence(0);
+      if (seq.length > 0) {
+        result[key] = seq;
+      } else {
+        i = saved;
+        result[key] = '';
+      }
+    } else {
+      result[key] = rawVal.replace(/^["']|["']$/g, '');
+    }
+  }
+  return result;
+}
+
+// List all available skills
+app.get('/api/skills', (req, res) => {
+  try {
+    if (!fs.existsSync(SKILLS_DIR)) {
+      return res.json([]);
+    }
+    const files = fs.readdirSync(SKILLS_DIR).filter(f => f.endsWith('.md'));
+    const skills = files.map(file => {
+      try {
+        const raw = fs.readFileSync(path.join(SKILLS_DIR, file), 'utf-8');
+        const content = raw.replace(/^---\n/, '').replace(/\n---\s*$/, '');
+        const parsed = parseSkillYaml(content);
+        return {
+          id: file.replace(/\.md$/, ''),
+          name: parsed.name || file.replace(/\.md$/, ''),
+          description: parsed.description || '',
+          category: parsed.category || 'General',
+          parameters: parsed.parameters || [],
+          hasPrompt: !!parsed.prompt,
+        };
+      } catch (err) {
+        console.error(`[Skills] Failed to parse ${file}:`, err.message);
+        return null;
+      }
+    }).filter(Boolean);
+
+    res.json(skills.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)));
+  } catch (error) {
+    console.error('[Skills] Error listing skills:', error);
+    res.status(500).json({ error: 'Failed to list skills', details: error.message });
+  }
+});
+
+// Run a skill — build prompt from template + parameters and call the active LLM
+app.post('/api/run-skill', async (req, res) => {
+  const { skillId, parameters = {} } = req.body;
+
+  if (!skillId) {
+    return res.status(400).json({ error: 'skillId is required' });
+  }
+
+  // Find the skill file
+  const skillPath = fs.existsSync(path.join(SKILLS_DIR, `${skillId}.md`))
+    ? path.join(SKILLS_DIR, `${skillId}.md`)
+    : null;
+
+  if (!skillPath) {
+    return res.status(404).json({ error: `Skill "${skillId}" not found` });
+  }
+
+  let skill;
+  try {
+    const raw = fs.readFileSync(skillPath, 'utf-8');
+    const content = raw.replace(/^---\n/, '').replace(/\n---\s*$/, '');
+    skill = parseSkillYaml(content);
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to parse skill file', details: err.message });
+  }
+
+  if (!skill.prompt) {
+    return res.status(400).json({ error: 'Skill has no prompt defined' });
+  }
+
+  // Validate required parameters
+  const missing = (skill.parameters || [])
+    .filter(p => p.required === true || p.required === 'true')
+    .filter(p => !parameters[p.name] || parameters[p.name].toString().trim() === '')
+    .map(p => p.label || p.name);
+  if (missing.length > 0) {
+    return res.status(400).json({ error: `Missing required parameters: ${missing.join(', ')}` });
+  }
+
+  // Inject parameters into prompt
+  let prompt = skill.prompt;
+  for (const [key, value] of Object.entries(parameters)) {
+    prompt = prompt.replaceAll(`{{${key}}}`, value);
+  }
+
+  const system = `You are Mari, an AI Chief of Staff assistant. Execute the following skill: ${skill.name}.`;
+
+  try {
+    console.log(`[Skills] Running skill "${skillId}" with LLM backend: ${llmSettings.useOllama ? 'Ollama' : llmSettings.useGemini ? 'Gemini' : 'Claude'}`);
+    let result;
+    if (llmSettings.useOllama) {
+      result = await generateLightReportWithOllama({ system, user: prompt });
+    } else if (llmSettings.useGemini) {
+      result = await generateLightReportWithGemini({ system, user: prompt });
+    } else {
+      result = await generateLightReportWithClaude({ system, user: prompt });
+    }
+    res.json({ result, skillName: skill.name });
+  } catch (err) {
+    console.error(`[Skills] Execution error for "${skillId}":`, err.message);
+    res.status(500).json({ error: 'Skill execution failed', details: err.message });
+  }
+});
+
+// ─── End Skills ─────────────────────────────────────────────────────────────
+
 // Run agents endpoint with real-time progress
 app.post('/api/run-agents', async (req, res) => {
   try {
@@ -1222,13 +1515,15 @@ app.post('/api/run-agents', async (req, res) => {
     child.on('exit', (code) => {
       console.log(`Agent execution completed with code ${code}`);
       const execution = activeExecutions.get(executionId);
+      const finalStatus = code === 0 ? 'completed' : 'failed';
       if (execution) {
-        execution.status = code === 0 ? 'completed' : 'failed';
+        execution.status = finalStatus;
         execution.exitCode = code;
         execution.endTime = new Date();
       }
       logStream.write(`\n=== Finished: ${new Date().toISOString()} | exit code ${code} ===\n`);
       logStream.end();
+      sendSmsNotification(agents, finalStatus);
     });
 
     // Handle process errors
@@ -1446,6 +1741,232 @@ app.put('/api/settings/llm', (req, res) => {
   }
 });
 
+// Get notifications settings
+app.get('/api/settings/notifications', (req, res) => {
+  res.json(notificationsSettings);
+});
+
+// Update notifications settings
+app.put('/api/settings/notifications', (req, res) => {
+  try {
+    const { smsEnabled, phoneNumber } = req.body;
+    if (smsEnabled !== undefined) notificationsSettings.smsEnabled = smsEnabled;
+    if (phoneNumber !== undefined) notificationsSettings.phoneNumber = phoneNumber;
+    saveNotificationsSettings(notificationsSettings);
+    res.json({ success: true, settings: notificationsSettings });
+  } catch (error) {
+    console.error('Error updating notifications settings:', error);
+    res.status(500).json({ error: 'Failed to update settings', details: error.message });
+  }
+});
+
+// ─── Scheduled Agents (Cron) ────────────────────────────────────────────────
+
+const CRON_MARKER = '# bb-chiefofstaff-agent';
+const PROJECT_ROOT = path.join(__dirname, '..');
+
+function readCrontab() {
+  try {
+    return execSync('crontab -l 2>/dev/null || true', { encoding: 'utf8' });
+  } catch {
+    return '';
+  }
+}
+
+function writeCrontab(content) {
+  const tmpFile = path.join(os.tmpdir(), 'crontab-tmp-' + Date.now());
+  fs.writeFileSync(tmpFile, content, 'utf8');
+  try {
+    execSync(`crontab ${tmpFile}`);
+  } finally {
+    fs.unlinkSync(tmpFile);
+  }
+}
+
+function parseCronJobs(crontabContent) {
+  const lines = crontabContent.split('\n');
+  const jobs = [];
+  let id = 0;
+  let pendingMarkerName = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Our managed marker comment
+    if (line.includes(CRON_MARKER)) {
+      const agentMatch = line.match(/# bb-chiefofstaff-agent:\s*(.+)/);
+      pendingMarkerName = agentMatch ? agentMatch[1].trim() : '';
+      continue;
+    }
+
+    // Skip empty lines and pure comments (but reset pendingMarker if comment breaks the pair)
+    if (line === '' || line.startsWith('#')) {
+      if (line.startsWith('#')) pendingMarkerName = null;
+      continue;
+    }
+
+    // Valid cron line: must start with a digit, *, or @
+    const parts = line.split(/\s+/);
+    if (parts.length >= 6) {
+      const schedule = parts.slice(0, 5).join(' ');
+      const command = parts.slice(5).join(' ');
+      const managed = pendingMarkerName !== null;
+      jobs.push({
+        id: id++,
+        agentName: pendingMarkerName || '',
+        schedule,
+        command,
+        managed,
+      });
+      pendingMarkerName = null;
+    }
+  }
+  return jobs;
+}
+
+function buildCrontabWithJobs(existingContent, jobs) {
+  // Remove all our managed blocks from existing crontab
+  const lines = existingContent.split('\n');
+  const filtered = [];
+  let skip = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes(CRON_MARKER)) {
+      skip = true;
+      // Skip this comment line and the next cron line
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === '') j++;
+      if (j < lines.length && !lines[j].trim().startsWith('#')) {
+        i = j; // skip cron line too
+      }
+      continue;
+    }
+    if (!skip) filtered.push(line);
+    skip = false;
+  }
+
+  // Remove trailing empty lines
+  while (filtered.length > 0 && filtered[filtered.length - 1].trim() === '') {
+    filtered.pop();
+  }
+
+  // Append only our managed jobs (unmanaged ones stay in the original crontab lines above)
+  for (const job of jobs.filter(j => j.managed !== false)) {
+    filtered.push(`${CRON_MARKER}: ${job.agentName}`);
+    filtered.push(`${job.schedule} ${job.command}`);
+  }
+
+  filtered.push(''); // trailing newline
+  return filtered.join('\n');
+}
+
+function buildAgentCommand(agentName) {
+  return `cd ${PROJECT_ROOT} && node src/index.js ${agentName} >> ${PROJECT_ROOT}/logs/cron-${agentName}.log 2>&1`;
+}
+
+// Get all managed cron jobs
+app.get('/api/settings/cron-jobs', (req, res) => {
+  try {
+    const crontabContent = readCrontab();
+    const jobs = parseCronJobs(crontabContent);
+    res.json(jobs);
+  } catch (error) {
+    console.error('Error reading crontab:', error);
+    res.status(500).json({ error: 'Failed to read crontab', details: error.message });
+  }
+});
+
+// Create a new cron job
+app.post('/api/settings/cron-jobs', (req, res) => {
+  try {
+    const { agentName, schedule } = req.body;
+    if (!agentName || !schedule) {
+      return res.status(400).json({ error: 'agentName and schedule are required' });
+    }
+
+    const crontabContent = readCrontab();
+    const jobs = parseCronJobs(crontabContent);
+
+    const newJob = {
+      id: jobs.length,
+      agentName,
+      schedule,
+      command: buildAgentCommand(agentName),
+      managed: true,
+    };
+    jobs.push(newJob);
+
+    const newCrontab = buildCrontabWithJobs(crontabContent, jobs);
+    writeCrontab(newCrontab);
+    res.json({ success: true, job: newJob, jobs });
+  } catch (error) {
+    console.error('Error creating cron job:', error);
+    res.status(500).json({ error: 'Failed to create cron job', details: error.message });
+  }
+});
+
+// Update an existing cron job (by index in the full jobs list — must be managed)
+app.put('/api/settings/cron-jobs/:index', (req, res) => {
+  try {
+    const idx = parseInt(req.params.index, 10);
+    const { agentName, schedule } = req.body;
+    if (!agentName || !schedule) {
+      return res.status(400).json({ error: 'agentName and schedule are required' });
+    }
+
+    const crontabContent = readCrontab();
+    const jobs = parseCronJobs(crontabContent);
+
+    if (idx < 0 || idx >= jobs.length) {
+      return res.status(404).json({ error: 'Cron job not found' });
+    }
+    if (jobs[idx].managed === false) {
+      return res.status(403).json({ error: 'Cannot edit external cron jobs from this UI' });
+    }
+
+    jobs[idx] = {
+      ...jobs[idx],
+      agentName,
+      schedule,
+      command: buildAgentCommand(agentName),
+      managed: true,
+    };
+
+    const newCrontab = buildCrontabWithJobs(crontabContent, jobs);
+    writeCrontab(newCrontab);
+    res.json({ success: true, jobs });
+  } catch (error) {
+    console.error('Error updating cron job:', error);
+    res.status(500).json({ error: 'Failed to update cron job', details: error.message });
+  }
+});
+
+// Delete a cron job (by index in the full jobs list — must be managed)
+app.delete('/api/settings/cron-jobs/:index', (req, res) => {
+  try {
+    const idx = parseInt(req.params.index, 10);
+
+    const crontabContent = readCrontab();
+    const jobs = parseCronJobs(crontabContent);
+
+    if (idx < 0 || idx >= jobs.length) {
+      return res.status(404).json({ error: 'Cron job not found' });
+    }
+    if (jobs[idx].managed === false) {
+      return res.status(403).json({ error: 'Cannot delete external cron jobs from this UI' });
+    }
+
+    jobs.splice(idx, 1);
+
+    const newCrontab = buildCrontabWithJobs(crontabContent, jobs);
+    writeCrontab(newCrontab);
+    res.json({ success: true, jobs });
+  } catch (error) {
+    console.error('Error deleting cron job:', error);
+    res.status(500).json({ error: 'Failed to delete cron job', details: error.message });
+  }
+});
+
 // Server-Sent Events endpoint for real-time progress
 app.get('/api/execution/:executionId/stream', (req, res) => {
   const { executionId } = req.params;
@@ -1532,15 +2053,7 @@ app.get('/api/execution/:executionId/stream', (req, res) => {
 // Return list of configured MCP server names (filtered to those listed in config.json)
 app.get('/api/mcp-servers', (req, res) => {
   try {
-    // Load the project config to get the allowed MCP list
-    const projectConfigPath = path.join(__dirname, '..', 'config.json');
-    const projectConfig = JSON.parse(fs.readFileSync(projectConfigPath, 'utf8'));
-    const allowedServers = [
-      ...(projectConfig.mcp?.work?.servers || []),
-      ...(projectConfig.mcp?.health?.servers || [])
-    ];
-
-    // Load the Claude Desktop config to get actual server details
+    // Load the Claude Desktop config to get all configured MCP servers
     const homeDir = os.homedir();
     const candidates = [
       process.env.MCP_CONFIG_PATH,
@@ -1553,15 +2066,17 @@ app.get('/api/mcp-servers', (req, res) => {
     for (const candidate of candidates) {
       if (fs.existsSync(candidate)) {
         desktopServers = JSON.parse(fs.readFileSync(candidate, 'utf8')).mcpServers || {};
-        console.log(`[mcp-servers] Desktop config: ${Object.keys(desktopServers).length} servers; allowed by config.json: ${allowedServers.length}`);
+        console.log(`[mcp-servers] Loaded ${Object.keys(desktopServers).length} servers from ${candidate}`);
         break;
       }
     }
 
-    // Return only servers that are both in config.json and in the desktop config
-    const servers = allowedServers
-      .filter(name => desktopServers[name])
-      .map(name => ({ name, command: desktopServers[name].command, args: desktopServers[name].args || [] }));
+    // Return all servers from the desktop config
+    const servers = Object.entries(desktopServers).map(([name, cfg]) => ({
+      name,
+      command: cfg.command,
+      args: cfg.args || []
+    }));
 
     res.json({ servers });
   } catch (error) {

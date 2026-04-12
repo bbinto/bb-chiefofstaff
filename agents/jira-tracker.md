@@ -3,6 +3,9 @@
 ## Purpose
 Provide a concise summary of Jira tickets created and updated for OV teams in the specified time period.
 
+## MCPs
+- Jira
+
 ## Data Sources
 - Jira/Atlassian MCP tools only
 - Configuration from config.json: `config.team.jiraProducts`, `config.jira`, and `config.settings.defaultDays`

@@ -85,7 +85,7 @@ code {
 .prose strong,
 .h3-section-content strong,
 .executive-summary-content strong,
-.prose strong * {
+.prose strong *:not(a) {
   font-weight: 700 !important;
   color: #111827;
 }

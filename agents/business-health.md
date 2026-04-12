@@ -3,6 +3,9 @@
 ## Purpose
 Monitor and report on the business health of Officevibe, including revenue metrics, deal activity, customer churn, and voice of customer insights.
 
+## MCPs
+- Slack
+
 ## Data Sources
 - Use sheets from manual_sources folder to analyze ARR
   - **IMPORTANT: A folder parameter may be specified** (e.g., "Week 1", "Week 2", "planning"). If provided, use files from that specific subfolder within manual_sources. If not provided, use files from the root of manual_sources.

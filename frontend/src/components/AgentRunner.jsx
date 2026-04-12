@@ -6,35 +6,23 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 function AgentRunner({ password, onClose }) {
   const [agents, setAgents] = useState([
     { name: 'prep-for-week', category: 'Prep', displayName: 'Prep for the Week', description: 'Prepare for upcoming week with todos, calendar, and 1-1 notes', lastRun: null },
-    { name: 'daily-brief', category: 'Prep', displayName: 'Daily Brief', description: 'Super concise daily brief with top 2 items from news, Slack, and Jira from yesterday', lastRun: null },
-    { name: 'onenote-todos', category: 'Prep', displayName: 'OneNote Todos', description: 'Extract and display all open todos from current week\'s OneNote', lastRun: null },
-    { name: 'weekly-recap', category: 'Prep', displayName: 'Weekly Recap', description: 'Weekly team catch-up and recap', lastRun: null },
     { name: 'business-health', category: 'Business', displayName: 'Business Health', description: 'Business and product health', requiresParam: 'manualSourcesFolder', lastRun: null },
     { name: 'business-pulse', category: 'Business', displayName: 'Business Pulse Brief', description: 'Business pulse brief', lastRun: null },
     { name: 'product-engineering', category: 'Productivity', displayName: 'Product Engineering', description: 'Product development and engineering updates', lastRun: null },
     { name: 'telemetry-deepdive', category: 'Telemetry', displayName: 'Telemetry Deep Dive', description: 'Deep dive into telemetry data', requiresParam: 'folder', lastRun: null },
-    { name: 'mixpanel-query', category: 'Telemetry',  displayName: 'Mixpanel Query', description: 'Query Mixpanel analytics for retention, usage, and feature metrics', lastRun: null },
-    { name: 'feature-telemetry-tracking', category: 'Telemetry', displayName: 'Feature Telemetry Tracking', description: 'Analyze one feature\'s Mixpanel telemetry vs overall MAU and adoption', requiresParam: 'feature', lastRun: null },
     { name: 'team-pulse', category: 'Team', displayName: 'Team Pulse', description: 'Team engagement and pulse survey analysis', lastRun: null },
     { name: 'jira-tracker', category: 'Productivity', displayName: 'Jira Tracker', description: 'Track Jira issues and progress', lastRun: null },
     { name: 'okr-progress', category: 'Productivity', displayName: 'OKR Progress', description: 'OKR updates and progress tracking', lastRun: null },
     { name: 'productivity-weekly-tracker', category: 'Productivity', displayName: 'Productivity Tracker', description: 'Weekly productivity tracking', lastRun: null },
-    { name: 'quarterly-review', category: 'Business', displayName: 'Quarterly Review', description: 'Quarterly review of product releases and OKR updates', lastRun: null },
-    { name: 'quarterly-performance-review', category: 'Team', displayName: 'Quarterly Performance Review', description: 'Quarterly performance review for Director of Product', lastRun: null },
-    { name: 'performance-review-q3', category: 'Team', displayName: 'Q3 Performance Review (WL)', description: 'Generate Q3 performance review using Workleap questionnaire format', requiresParam: 'email', lastRun: null },
-    { name: 'performance-review-q4', category: 'Team', displayName: 'Q4 Performance Review (WL)', description: 'Generate Q4 performance review: strengths, improvement areas, and overall rating based on impact and contributions', requiresParam: 'email', paramType: 'teamMemberEmail', lastRun: null },
     { name: 'thoughtleadership-updates', category: 'Prep', displayName: 'Thought Leadership', description: 'Product thought leadership and new topics', lastRun: null },
     { name: 'edge-intel', category: 'Prep', displayName: 'Edge Intel', description: 'Provocative & contrarian: newest ideas, controversial takes, original findings only', lastRun: null },
-    { name: 'strategy-roadmap', category: 'Business', displayName: 'Strategy Roadmap', description: 'Strategy roadmap', lastRun: null },
     { name: 'slack-user-analysis', category: 'Team', displayName: 'Slack User Analysis', description: 'Analyze a Slack user\'s contributions', requiresParam: 'slackUserId', paramType: 'slackUserTeam', lastRun: null },
     { name: '1-1', category: 'Team', displayName: '1-1 Prep', description: 'Prepare for a 1-1 meeting', requiresParam: 'email', paramType: 'oneOnOne', lastRun: null },
     { name: 'epp', category: 'Team', displayName: 'Employee Personality Profile', description: 'Generate personality profile using Myers-Briggs and Insights frameworks', requiresParam: 'email', lastRun: null },
-    { name: 'weekly-executive-summary', category: 'Prep',  displayName: 'Weekly Executive Summary', description: 'Generate executive summary from all reports', requiresParam: 'week', lastRun: null },
-    { name: 'good-vibes-recognition', category: 'Team', displayName: 'Recognition Recommendations', description: 'Suggests recognitions for team members', lastRun: null },
     { name: 'icp-inspector', category: 'Business', displayName: 'ICP Inspector', description: 'Cross-check CRM companies (20–250 seats) with Gong calls and VoC; split by closed won/lost', lastRun: null },
-    { name: 'feature-insights', category: 'Business', displayName: 'FY27 Feature Insights', description: 'Mine Slack, VoC, and Jira for OV/Officevibe feature requests and produce a prioritized FY27 ideas list', lastRun: null },
     { name: 'bi-weekly-team', category: 'Team', displayName: 'Bi-Weekly Team Meeting', description: 'Prepare a short agenda doc for the OV bi-weekly sync: attendance, business health, eng highlights, and discussion topics', requiresParam: 'manualSourcesFolder', lastRun: null },
     { name: 'podcast-digest', category: 'Prep', displayName: 'Podcast Digest', description: 'Critical learning digest from podcast clip notes in OneNote → General section', lastRun: null },
+    { name: 'check-podcasts', category: 'Prep', displayName: 'Check Podcasts', description: 'Search your saved Spotify shows for episodes matching keywords in the selected date range', requiresParam: 'prompt', lastRun: null },
 
   ])
 
@@ -49,7 +37,8 @@ function AgentRunner({ password, onClose }) {
     folder: '',
     email: '',
     week: '',
-    feature: ''
+    feature: '',
+    prompt: ''
   })
   const [releases, setReleases] = useState({}) // config.releases for feature dropdown
   const [teamMembers, setTeamMembers] = useState([]) // team members for slack user analysis
@@ -525,6 +514,7 @@ function AgentRunner({ password, onClose }) {
                       {agent.paramType === 'teamMemberEmail' && 'Select Team Member'}
                       {agent.requiresParam === 'week' && 'Week'}
                       {agent.requiresParam === 'feature' && 'Feature (release)'}
+                      {agent.requiresParam === 'prompt' && 'Keywords'}
                       <span className="text-orange-600 ml-1">*</span>
                     </label>
                     <div className="text-xs text-gray-600 mb-2">
@@ -598,6 +588,7 @@ function AgentRunner({ password, onClose }) {
                           agent.requiresParam === 'folder' ? 'e.g., week1' :
                           agent.requiresParam === 'email' ? 'e.g., user@example.com' :
                           agent.requiresParam === 'week' ? 'e.g., week 1 or week 1 2025' :
+                          agent.requiresParam === 'prompt' ? 'e.g., AI, product strategy, founder stories' :
                           ''
                         }
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"

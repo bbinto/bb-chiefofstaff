@@ -8,6 +8,9 @@ Monitor multiple sources of product thought leadership and identify new topics, 
 - RSS-MCP
 - reddit
 - nytimes
+- Slack-LannysNewsletter
+- Slack-WomenInProduct
+- Slack-Rand
 
 ## Data Sources
 All source URLs are already provided in the **## Thought Leadership** section of your configuration context. Do NOT attempt to read any file — use only the URLs listed there.
@@ -62,7 +65,9 @@ Before writing the final report, you MUST check previous thoughtleadership repor
   - ONLY include articles where the publication date falls within the date range specified in your configuration context
   - The date range is provided in your configuration context (see the ## Dates section)
   - Example: If date range is 2026-01-08 to 2026-01-15, ONLY include articles published between 2026-01-08 and 2026-01-15 (inclusive)
-  - **EXCLUDE any articles published before the start date** - filter out old articles that don't match the date range
+  - **EXCLUDE any articles published before the start date or after the end date** — filter them out silently
+  - **DO NOT list, mention, reference, or show any article outside the date range in any form** — not as an exclusion note, not as a skipped item, not at all
+  - Silently discard out-of-range articles and proceed as if they do not exist
   - Verify each article's publication date matches the date range before including it in your output
 - **Source Attribution**:
   - **ALWAYS check article-level metadata FIRST** - the article's actual publication is more important than the feed name:
@@ -146,7 +151,8 @@ Before writing the final report, you MUST check previous thoughtleadership repor
     - Calculate the start date based on the date range provided in your configuration context (see the ## Dates section)
     - Use the date range: Start date to End date (inclusive) in ISO format (YYYY-MM-DD)
     - **ONLY include articles where the publication date (pubDate or published date) falls within this date range**
-    - **EXCLUDE any articles published before the start date** - filter out old articles
+    - **EXCLUDE any articles published before the start date or after the end date** — discard silently, do not list or mention them
+    - **DO NOT show, reference, or note any out-of-range article in the output in any form**
     - Verify the article's publication date before including it
     - Example: If date range is 2026-01-08 to 2026-01-15, ONLY include articles with publication dates between 2026-01-08 and 2026-01-15 (inclusive)
   - **CRITICAL: Source Attribution**:
@@ -221,7 +227,28 @@ For each subreddit listed under "Reddit Sources" in your configuration context:
 - **No duplicates**: Reddit posts must NOT appear in any other section
 - Do NOT fetch subreddits not listed in your configuration context
 
-### 6. Topic Identification and Categorization
+### 6. Community Slack Intelligence
+
+Scan the most-reacted and most-discussed posts from external product community Slack workspaces within the date range.
+
+**Workspaces and channels** (from `config["Slack-LannysNewsletter"]`, `config["Slack-WomenInProduct"]`, and `config["Slack-Rand"]`):
+- **Slack-LannysNewsletter**: channels `C015W5EUZ6D`, `C04J0R5D755` — use `mcp__Slack-LannysNewsletter__` tools
+- **Slack-WomenInProduct**: channels `C0B74V8KF`, `C0DMM8VUZ` — use `mcp__Slack-WomenInProduct__` tools
+- **Slack-Rand**: channels `C82GM1W06`, `C014Y7K5U8K` — use `mcp__Slack-Rand__` tools
+
+**Strategy**:
+1. For each channel in both workspaces, call `conversations_history` with the date range from your configuration context (ISO format)
+2. Rank messages by total reaction count — select the top 3 most-reacted posts across all 4 channels combined
+3. Also include posts with high reply counts (active discussions) or links to articles/resources that sparked engagement
+4. **Deduplication**: If a post links to an article already covered in another section of this report, skip it here
+5. **If a workspace MCP is unavailable**: Note it with ⚠️ and continue — do not fail the report
+
+**Selection criteria**:
+- Highest reaction count within the date range
+- Posts sharing an article, framework, research, or contrarian take — not casual chat or job postings
+- Topics relevant to product management, AI, leadership, or industry trends
+
+### 7. Topic Identification and Categorization
 For each source, identify:
 - **New Topics**: Concepts, frameworks, or ideas that are newly emerging
 - **Trending Topics**: Topics that are gaining significant attention
@@ -230,7 +257,7 @@ For each source, identify:
 - **Industry Insights**: Broader industry trends affecting product management
 - **Thought Leader Perspectives**: Key insights from recognized product thought leaders
 
-### 7. Relevance Assessment
+### 8. Relevance Assessment
 For each identified topic:
 - Assess relevance to current product work
 - Identify potential impact on product strategy
@@ -342,6 +369,17 @@ For each trending topic (bullet format — NO tables):
 
 **🚨 RULE**: Post link MUST be the exact `Link:` value returned by `fetch_reddit_hot_threads`. If no `Link:` was present in the tool output for that post, render the title as plain text with no link. Never construct, guess, or modify any Reddit URL.
 
+### Community Slack Highlights
+*(Top 3 most-reacted posts from Lanny's Newsletter, Women in Product, and Rand Slack workspaces — bullet format)*
+
+- **[Workspace name]** — #[channel]
+  - **Post**: [1-2 sentence summary of what was shared or discussed]
+  - **Reactions**: [total reaction count] | **Replies**: [reply count]
+  - **Link**: [article or resource URL if the post shared one, otherwise omit]
+  - **Why it matters**: [One sentence — relevance to product/AI/leadership]
+
+*(Repeat for each of the top 3 posts. If a workspace MCP is unavailable, note it with ⚠️ and skip that workspace.)*
+
 ### Recommended Actions
 - Topics to research further: [List]
 - Discussions to initiate with team: [List]
@@ -362,7 +400,7 @@ For each trending topic (bullet format — NO tables):
 - **Source diversity**: no single domain appears more than twice across all article sections
 - **At least 50% of article entries come from RSS feeds**, not web browsing
 - **Article sections use bullet format; Reddit section uses table format**
-- **ONLY articles published within the specified date range are included** - old articles are filtered out
+- **ONLY articles published within the specified date range are included** — out-of-range articles are silently discarded and never listed or mentioned
 - **All sources correctly attributed using article-level metadata (author + URL domain/publication)** - NOT feed names
 - **Article authors correctly identified from article author fields** - do not use feed author if article author differs
 - **URL domain checked to identify actual publication** - e.g., johnpcutler.com = John Cutler's The Beautiful Mess, NOT Lenny's Newsletter
@@ -372,5 +410,8 @@ For each trending topic (bullet format — NO tables):
 - Summary is actionable and focused on what matters most
 - Sources are properly attributed with direct links to articles
 - All article references include markdown-formatted links: `[Title](url)`
+- **Community Slack Highlights** section present with top 3 most-reacted posts from Lanny's Newsletter, Women in Product, and Rand workspaces
+- Community Slack posts ranked by reaction count; casual chat and job postings excluded
+- Community workspace MCP failures handled gracefully with ⚠️ notice — report continues without them
 
 

@@ -137,7 +137,17 @@ export class AgentRunner {
    * Ollama (OpenAI-compatible) supports the same format as Gemini.
    */
   convertParamsForOllama(params) {
-    return this.convertParamsForGemini(params);
+    const converted = this.convertParamsForGemini(params);
+
+    // Force tool use on the first turn so Ollama models don't skip straight to a text answer.
+    // Once tool results exist in the conversation (role === 'tool'), switch to 'auto' so the
+    // model can produce a final text response when it has gathered enough data.
+    if (converted.tools && converted.tools.length > 0) {
+      const hasToolResults = converted.messages.some(m => m.role === 'tool');
+      converted.tool_choice = hasToolResults ? 'auto' : 'required';
+    }
+
+    return converted;
   }
 
   /**
@@ -297,7 +307,9 @@ export class AgentRunner {
       }
 
       // Tool calls → Anthropic tool_use blocks
-      if (finishReason === 'tool_calls' && message?.tool_calls?.length > 0) {
+      // Check message.tool_calls directly — many Ollama models return finish_reason 'stop'
+      // even when tool calls are present, so we cannot rely on finish_reason alone.
+      if (message?.tool_calls?.length > 0) {
         for (const tc of message.tool_calls) {
           let input = {};
           try { input = JSON.parse(tc.function.arguments); } catch { input = { _raw: tc.function.arguments }; }
@@ -605,6 +617,17 @@ export class AgentRunner {
         return `\n\n**IMPORTANT: Email Parameter Required**\nNo email address was provided. Please ask the user for the email address of the person to review before proceeding. The email should match someone in config.team.ovTeamMembers.`;
       },
 
+      'check-podcasts': () => {
+        const kw = p.prompt;
+        if (!kw) {
+          return '\n\n**IMPORTANT: Keywords Required**\nNo keywords were provided. Please specify comma-separated keywords using the --prompt parameter. Example: "AI, product strategy, founder"';
+        }
+        const rangeNote = this.dateRange
+          ? `\n\nDate range to filter episodes: **${this.dateRange.startDate}** to **${this.dateRange.endDate}** (inclusive). Only include episodes whose release_date falls within this range.`
+          : '';
+        return `\n\n**IMPORTANT: Podcast Search Parameters**\nThe keywords to search for are: **${kw}**\nSearch for these keywords (case-insensitive) in each episode's title and description. An episode matches if it contains at least one of the keywords.${rangeNote}`;
+      },
+
       'feature-telemetry-tracking': () => {
         const rawFeature = p.feature;
         const featureKeyTrimmed = typeof rawFeature === 'string' ? rawFeature.trim() : (rawFeature ? String(rawFeature).trim() : '');
@@ -675,12 +698,13 @@ export class AgentRunner {
     // Get available tools from MCP (filtered by agent type)
     let tools = this.buildToolsSchema(agentName);
 
-    // Gemini silently returns empty responses when given too many tools.
+    // Gemini and Ollama silently ignore tools or fail to call them when given too many.
     // Cap using config limit and honour priorityServers ordering.
-    if (this.useGemini) {
-      const geminiConfig = this.config?.gemini || {};
-      const maxTools = geminiConfig.maxTools ?? 20;
-      const priorityServers = (geminiConfig.priorityServers || []).map(s => s.toLowerCase());
+    if (this.useGemini || this.useOllama) {
+      const providerKey = this.useGemini ? 'gemini' : 'ollama';
+      const providerConfig = this.config?.[providerKey] || {};
+      const maxTools = providerConfig.maxTools ?? 20;
+      const priorityServers = (providerConfig.priorityServers || []).map(s => s.toLowerCase());
 
       if (tools.length > maxTools) {
         // Sort: priority-server tools first, then the rest (preserve relative order within each group)
@@ -690,13 +714,13 @@ export class AgentRunner {
           const rest = tools.filter(t => !isPriority(t));
           tools = [...priority, ...rest];
         }
-        console.warn(`⚠️  Gemini tool limit: capping ${tools.length} tools to ${maxTools}. Priority servers: [${priorityServers.join(', ')}]. Keeping: ${tools.slice(0, maxTools).map(t => t.name).join(', ')}`);
+        console.warn(`⚠️  ${providerKey} tool limit: capping ${tools.length} tools to ${maxTools}. Priority servers: [${priorityServers.join(', ')}]. Keeping: ${tools.slice(0, maxTools).map(t => t.name).join(', ')}`);
         tools = tools.slice(0, maxTools);
       }
       // Strip internal _server field before sending to API
       tools = tools.map(({ _server, ...t }) => t);
     } else {
-      // Strip _server for non-Gemini paths too
+      // Strip _server for non-Gemini/Ollama paths too
       tools = tools.map(({ _server, ...t }) => t);
     }
 
@@ -915,6 +939,8 @@ export class AgentRunner {
               } else {
                 // Use MCP client for other tools
                 toolResult = await this.mcpClient.callTool(toolUse.name, toolUse.input);
+                // Filter RSS results by date range at the harness level so the LLM never sees out-of-range articles
+                toolResult = this.filterRssToolResult(toolResult, toolUse.name);
               }
 
               // Summarize large tool results to reduce token usage
@@ -1451,6 +1477,53 @@ ${(() => {
 **Current Date/Time**: Today is ${todayISO}. The current date and time information is already provided here - DO NOT call any date/time retrieval tools (like get_current_time or similar).
 **Current ISO Calendar Week**: Week ${currentISOWeek} of ${today.getFullYear()} (use this when looking for OneNote weekly pages, e.g., "Week ${currentISOWeek}" or "Week ${currentISOWeek}, ${today.getFullYear()}").
 **Analysis Period**: Use ISO format YYYY-MM-DD for date params. The dates define an INCLUSIVE date range (period) from ${startDateISO} to ${endDateISO} (includes both start and end dates). When querying data sources, use parameters like after: "${startDateISO}" (inclusive) and before: "${endDateISO}" or onOrBefore: "${endDateISO}" (depending on API) to query data within this period.${threeDaysAgoISO ? ` For "last 3 days", use "${threeDaysAgoISO}".` : ''}`;
+  }
+
+  /**
+   * Filter RSS get_feed results by the agent's configured date range.
+   * Called immediately after each MCP tool result so the LLM never sees out-of-range articles.
+   * Only applies when toolName === 'get_feed' and this.dateRange is set.
+   */
+  filterRssToolResult(toolResult, toolName) {
+    if (toolName !== 'get_feed') return toolResult;
+    if (!this.dateRange?.startDate || !this.dateRange?.endDate) return toolResult;
+
+    try {
+      // MCP protocol wraps results as { content: [{ type: 'text', text: '<json>' }] }
+      const textBlock = toolResult?.content?.[0];
+      if (!textBlock || textBlock.type !== 'text' || typeof textBlock.text !== 'string') return toolResult;
+
+      // If the tool returned an error string, don't try to parse it
+      if (textBlock.text.startsWith('Error')) return toolResult;
+
+      const feedData = JSON.parse(textBlock.text);
+      if (!feedData?.items || !Array.isArray(feedData.items)) return toolResult;
+
+      // Build inclusive date bounds (full days in UTC)
+      const startDate = new Date(this.dateRange.startDate + 'T00:00:00.000Z');
+      const endDate = new Date(this.dateRange.endDate + 'T23:59:59.999Z');
+
+      const before = feedData.items.length;
+      feedData.items = feedData.items.filter(item => {
+        if (!item.pubDate) return false; // no date metadata → exclude (cannot verify range)
+        const pub = new Date(item.pubDate);
+        if (isNaN(pub.getTime())) return false; // unparseable date → exclude
+        return pub >= startDate && pub <= endDate;
+      });
+      const after = feedData.items.length;
+
+      if (before !== after) {
+        console.log(`📅 RSS date filter: removed ${before - after} out-of-range article(s) (keeping ${this.dateRange.startDate} → ${this.dateRange.endDate}), ${after} remain`);
+      }
+
+      return {
+        ...toolResult,
+        content: [{ type: 'text', text: JSON.stringify(feedData) }]
+      };
+    } catch (e) {
+      console.warn(`⚠️  RSS date filter skipped (parse error): ${e.message}`);
+      return toolResult; // return unmodified if anything goes wrong
+    }
   }
 
   /**
