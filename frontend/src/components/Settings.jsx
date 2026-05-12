@@ -40,7 +40,7 @@ function Settings({ password, onBack }) {
   const [validationError, setValidationError] = useState(null)
 
   const localOllamaModels = OLLAMA_LOCAL_MODELS
-  const cloudOllamaModels = OLLAMA_CLOUD_MODELS.map(m => ({ value: m.value, label: `${m.label} (${m.tag})` }))
+  const cloudOllamaModels = OLLAMA_CLOUD_MODELS.map(m => ({ value: m.value, label: `${m.label} (${m.tag})`, description: m.description }))
 
   useEffect(() => {
     if (activeTab === 'llm') {
@@ -538,9 +538,12 @@ function Settings({ password, onBack }) {
                     </optgroup>
                   )}
                 </select>
-                <p className="text-xs text-gray-600 mt-1">
-                  ☁️ Cloud models run remotely — easy on your Pi. 🖥️ Local models require <code className="bg-gray-200 px-1 rounded">ollama serve</code>.
-                </p>
+                {(() => {
+                  const selected = cloudOllamaModels.find(m => m.value === ollamaModel)
+                  return selected?.description
+                    ? <p className="text-xs text-amber-800 bg-amber-100 border border-amber-200 rounded px-2 py-1.5 mt-1.5">💡 {selected.description}</p>
+                    : <p className="text-xs text-gray-600 mt-1">☁️ Cloud models run remotely — easy on your Pi. 🖥️ Local models require <code className="bg-gray-200 px-1 rounded">ollama serve</code>.</p>
+                })()}
               </div>
             </div>
           )}

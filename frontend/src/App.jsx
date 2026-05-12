@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, useNavigate, useParams, useLocation } from 'react-router-dom'
+import posthog from 'posthog-js'
 import ReportList from './components/ReportList'
 import ReportViewer from './components/ReportViewer'
 import FilterBar from './components/FilterBar'
@@ -34,6 +35,10 @@ function AppContent() {
   const [showSkillRunner, setShowSkillRunner] = useState(false)
 
   useEffect(() => {
+    posthog.capture('$pageview', { path: location.pathname })
+  }, [location.pathname])
+
+  useEffect(() => {
     const storedPassword = sessionStorage.getItem('appPassword')
     if (storedPassword) {
       setPassword(storedPassword)
@@ -55,9 +60,11 @@ function AppContent() {
     setPassword(pass)
     setIsAuthenticated(true)
     sessionStorage.setItem('appPassword', pass)
+    posthog.capture('login')
   }
 
   const handleLogout = () => {
+    posthog.capture('logout')
     setPassword(null)
     setIsAuthenticated(false)
     sessionStorage.removeItem('appPassword')
@@ -104,6 +111,7 @@ function AppContent() {
 
   const toggleFavorite = async (reportId) => {
     const isFav = favorites.includes(reportId)
+    posthog.capture('report_favorite_toggled', { reportId, action: isFav ? 'unfavorite' : 'favorite' })
     // Optimistic update — respond immediately, rollback on failure
     const optimistic = isFav ? favorites.filter(id => id !== reportId) : [...favorites, reportId]
     setFavorites(optimistic)
@@ -233,7 +241,7 @@ function AppContent() {
 
             <div className="flex items-center gap-4">
               <button
-                onClick={() => setShowAgentRunner(true)}
+                onClick={() => { setShowAgentRunner(true); posthog.capture('agent_runner_opened') }}
                 className={navLinkClass(null)}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -243,7 +251,7 @@ function AppContent() {
               </button>
 
               <button
-                onClick={() => setShowSkillRunner(true)}
+                onClick={() => { setShowSkillRunner(true); posthog.capture('skill_runner_opened') }}
                 className={navLinkClass(null)}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -340,7 +348,7 @@ function AppContent() {
               />
               <ReportList
                 reports={filteredReports}
-                onReportSelect={(report) => navigate(`/${report.filename}`)}
+                onReportSelect={(report) => { posthog.capture('report_opened', { agentName: report.agentName, filename: report.filename }); navigate(`/${report.filename}`) }}
                 favorites={favorites}
                 onToggleFavorite={toggleFavorite}
                 password={password}

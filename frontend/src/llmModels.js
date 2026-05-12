@@ -14,14 +14,36 @@ export const GEMINI_MODELS = [
 ]
 
 export const OLLAMA_CLOUD_MODELS = [
-  { value: 'gpt-oss:120b-cloud',          label: 'GPT-OSS 120B',           tag: 'High quality' },
-  { value: 'qwen3-vl:235b-cloud',         label: 'Qwen3 VL 235B',          tag: 'Vision' },
-  { value: 'deepseek-v3.1:671b-cloud',    label: 'DeepSeek V3.1 671B',     tag: 'High quality' },
-  { value: 'nemotron-3-nano:30b-cloud',   label: 'Nemotron 3 Nano 30B',    tag: 'Low latency' },
-  { value: 'glm-5:cloud',                 label: 'GLM-5',                  tag: 'General purpose' },
-  { value: 'qwen3.5:397b-cloud',          label: 'Qwen3.5 397B',           tag: 'High quality' },
-  { value: 'nemotron-3-super:cloud',      label: 'Nemotron 3 Super',       tag: 'High quality' },
-  { value: 'minimax-m2.7:cloud',          label: 'MiniMax M2.7',           tag: 'General purpose' },
+  {
+    value: 'deepseek-v4-pro:cloud',
+    label: 'DeepSeek V4 Pro',
+    tag: 'Reasoning · Analysis',
+    description: 'Best for deep analytical tasks and multi-step reasoning. Use when you need to draw structured conclusions from complex information.',
+  },
+  {
+    value: 'deepseek-v3.1:671b-cloud',
+    label: 'DeepSeek V3.1 671B',
+    tag: 'Deep comprehension',
+    description: 'Largest model available — strongest raw comprehension for dense documents or nuanced content. Slower, but most thorough on big information loads.',
+  },
+  {
+    value: 'kimi-k2.6:cloud',
+    label: 'Kimi K2.6',
+    tag: 'Long context · Agentic',
+    description: 'Specialist for extremely long contexts. Best when feeding in large documents, multiple sources, or running agentic info-gathering across many inputs.',
+  },
+  {
+    value: 'kimi-k2-thinking:cloud',
+    label: 'Kimi K2 Thinking',
+    tag: 'Deep reasoning',
+    description: 'Extended step-by-step reasoning. Great for synthesizing multiple sources into a coherent, well-structured conclusion or analysis.',
+  },
+  {
+    value: 'glm-5.1:cloud',
+    label: 'GLM-5.1',
+    tag: 'Thinking · 128K context',
+    description: 'Solid all-rounder with 128K context, thinking mode, and tool use. Good default for research workflows and summarization tasks.',
+  },
 ]
 
 export const OLLAMA_LOCAL_MODELS = [

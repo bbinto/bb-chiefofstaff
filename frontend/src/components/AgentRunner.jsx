@@ -23,6 +23,8 @@ function AgentRunner({ password, onClose }) {
     { name: 'bi-weekly-team', category: 'Team', displayName: 'Bi-Weekly Team Meeting', description: 'Prepare a short agenda doc for the OV bi-weekly sync: attendance, business health, eng highlights, and discussion topics', requiresParam: 'manualSourcesFolder', lastRun: null },
     { name: 'podcast-digest', category: 'Prep', displayName: 'Podcast Digest', description: 'Critical learning digest from podcast clip notes in OneNote → General section', lastRun: null },
     { name: 'check-podcasts', category: 'Prep', displayName: 'Check Podcasts', description: 'Search your saved Spotify shows for episodes matching keywords in the selected date range', requiresParam: 'prompt', lastRun: null },
+    { name: 'slack-digest', category: 'Prep', displayName: 'Slack Digest', description: 'Top 3 most-reacted posts per channel across all Slack workspaces — filtered for product, HR tech, AI & leadership signal', lastRun: null },
+    { name: 'news-digest', category: 'Prep', displayName: 'News Digest', description: 'Latest articles from all configured RSS feeds — strict date filtering, up to 5 articles per feed with title, date and link', lastRun: null },
 
   ])
 

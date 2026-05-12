@@ -7,7 +7,7 @@ const API_URL = import.meta.env.VITE_API_URL || ''
 const ALL_MODELS = [
   ...CLAUDE_MODELS.map(m => ({ backend: 'claude', model: m.value, label: m.label, color: 'blue', tag: m.tag })),
   ...GEMINI_MODELS.map(m => ({ backend: 'gemini', model: m.value, label: m.label, color: 'purple', tag: m.tag })),
-  ...OLLAMA_CLOUD_MODELS.map(m => ({ backend: 'ollama', model: m.value, label: m.label, color: 'amber', tag: m.tag })),
+  ...OLLAMA_CLOUD_MODELS.map(m => ({ backend: 'ollama', model: m.value, label: m.label, color: 'amber', tag: m.tag, description: m.description })),
   ...OLLAMA_LOCAL_MODELS.map(m => ({ backend: 'ollama', model: m.value, label: m.label, color: 'amber', tag: m.tag })),
 ]
 
@@ -223,6 +223,7 @@ export default function LLMEvaluator({ password }) {
                     <button
                       key={key}
                       onClick={() => toggleModel(key)}
+                      title={m.description || undefined}
                       className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-all ${active ? colorActive[m.color] : colorInactive}`}
                     >
                       {m.label}

@@ -707,12 +707,28 @@ export class AgentRunner {
       const priorityServers = (providerConfig.priorityServers || []).map(s => s.toLowerCase());
 
       if (tools.length > maxTools) {
-        // Sort: priority-server tools first, then the rest (preserve relative order within each group)
+        // Sort by most-specific priority match: find the highest-ranked (lowest index) priority
+        // server whose name is the longest match in the tool's server name. This ensures that
+        // "Slack-LannysNewsletter" tools rank at index 0 rather than being displaced by the
+        // generic "Slack" entry which would otherwise match all Slack workspace tools equally.
         if (priorityServers.length > 0) {
-          const isPriority = t => priorityServers.some(p => (t._server || t.name || '').toLowerCase().includes(p));
-          const priority = tools.filter(t => isPriority(t));
-          const rest = tools.filter(t => !isPriority(t));
-          tools = [...priority, ...rest];
+          const getPriorityRank = (tool) => {
+            const serverName = (tool._server || tool.name || '').toLowerCase();
+            let bestRank = Infinity;
+            let bestLen = -1;
+            priorityServers.forEach((p, i) => {
+              if (serverName.includes(p) && p.length > bestLen) {
+                bestLen = p.length;
+                bestRank = i;
+              }
+            });
+            return bestRank;
+          };
+          // Stable sort: tools with a lower (more specific) priority rank come first;
+          // tools with equal rank preserve their original relative order.
+          const withRank = tools.map((t, idx) => ({ t, rank: getPriorityRank(t), idx }));
+          withRank.sort((a, b) => a.rank !== b.rank ? a.rank - b.rank : a.idx - b.idx);
+          tools = withRank.map(r => r.t);
         }
         console.warn(`⚠️  ${providerKey} tool limit: capping ${tools.length} tools to ${maxTools}. Priority servers: [${priorityServers.join(', ')}]. Keeping: ${tools.slice(0, maxTools).map(t => t.name).join(', ')}`);
         tools = tools.slice(0, maxTools);
