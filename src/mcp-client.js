@@ -184,12 +184,14 @@ export class MCPClientManager {
       console.log(`[MCPClientManager] Lazy init: no MCPs required for this agent — skipping connections`);
       return;
     } else {
-      // Match requested names against config keys using flexible normalisation
+      // Match requested names against config keys using exact normalised match.
+      // Exact match prevents "Slack" from accidentally matching "Slack-LannysNewsletter" or vice versa.
+      // normalize() already strips the "-mcp" suffix, so "RSS" and "RSS-MCP" both normalize to "rss".
       targetNames = allConfigNames.filter(configName => {
         const nc = this.normalizeServerName(configName);
         return serverNames.some(req => {
           const nr = this.normalizeServerName(req);
-          return nc.includes(nr) || nr.includes(nc);
+          return nc === nr;
         });
       });
 
@@ -198,7 +200,7 @@ export class MCPClientManager {
         const nr = this.normalizeServerName(req);
         return !allConfigNames.some(configName => {
           const nc = this.normalizeServerName(configName);
-          return nc.includes(nr) || nr.includes(nc);
+          return nc === nr;
         });
       });
       if (unmatched.length > 0) {

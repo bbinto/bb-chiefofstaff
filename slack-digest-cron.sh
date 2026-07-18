@@ -1,10 +1,7 @@
 #!/bin/bash
 
-# Thought Leadership Cron Script
-# This script:
-# 1. Generates a thought leadership report
-# 2. Creates a light version
-# 3. Generates a podcast from the light version and uploads it
+# Slack Digest Cron Script
+# Runs the slack-digest agent and saves the report
 
 set -eu
 
@@ -16,7 +13,7 @@ PROJECT_DIR="/home/pi/Documents/GitHub/bb-chiefofstaff"
 cd "$PROJECT_DIR"
 
 # Log file for cron output
-LOG_FILE="$PROJECT_DIR/logs/thoughtleadership-cron.log"
+LOG_FILE="$PROJECT_DIR/logs/slack-digest-cron.log"
 mkdir -p "$PROJECT_DIR/logs"
 
 # Function to log with timestamp
@@ -25,7 +22,7 @@ log() {
 }
 
 log "==================================================================="
-log "Starting Thought Leadership Workflow"
+log "Starting Slack Digest Workflow"
 log "==================================================================="
 
 # Log which LLM is selected (env vars take precedence over llm-settings.json)
@@ -46,12 +43,11 @@ try {
   log "LLM Selected: $LLM_INFO"
 fi
 
-# Step 1: Generate the thought leadership report
-log "Step 1: Generating thought leadership report..."
-OUTPUT=$(npm start thoughtleadership-updates 2>&1 | tee -a "$LOG_FILE")
+# Generate the slack digest report
+log "Generating slack digest report..."
+OUTPUT=$(npm start slack-digest 2>&1 | tee -a "$LOG_FILE")
 
 # Extract the filename from the output
-# Looking for pattern: "Full report saved to: /path/to/reports/filename.md"
 REPORT_PATH=$(echo "$OUTPUT" | grep -oP 'Full report saved to: \K.*\.md$' | tail -1)
 
 if [ -z "$REPORT_PATH" ]; then
@@ -62,29 +58,7 @@ fi
 
 log "Report generated: $REPORT_PATH"
 
-# Extract just the filename without path and extension
-FILENAME=$(basename "$REPORT_PATH" .md)
-log "Extracted filename: $FILENAME"
-
-# Step 2: Create light version
-log "Step 2: Creating light version..."
-if npm run light -- "$FILENAME" 2>&1 | tee -a "$LOG_FILE"; then
-  log "Light version created successfully: ${FILENAME}-light.md"
-else
-  log "ERROR: Failed to create light version"
-  exit 1
-fi
-
-# Step 3: Generate podcast from light version and upload
-log "Step 3: Generating podcast from light version and uploading..."
-if sh podcast.sh "${FILENAME}-light" 2>&1 | tee -a "$LOG_FILE"; then
-  log "Podcast created and uploaded successfully: ${FILENAME}-light.mp3"
-else
-  log "ERROR: Failed to create or upload podcast"
-  exit 1
-fi
-
 log "==================================================================="
-log "Thought Leadership Workflow Completed Successfully"
+log "Slack Digest Workflow Completed Successfully"
 log "==================================================================="
 log ""

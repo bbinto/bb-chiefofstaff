@@ -1585,12 +1585,14 @@ ${(() => {
         filteredTools = [];
         console.log(`[buildToolsSchema] No MCPs configured for ${agentName}, using custom tools only`);
       } else {
-        // Filter to exactly the listed MCPs using flexible name matching
+        // Filter to exactly the listed MCPs using exact normalised match.
+        // Exact match prevents "Slack" from bleeding into "Slack-LannysNewsletter" or vice versa.
+        // normalize() strips the "-mcp" suffix, so "RSS" and "RSS-MCP" both match correctly.
         filteredTools = availableTools.filter(tool => {
           const normalizedServer = this.normalizeServerName(tool.server);
           return agentMCPs.some(mcp => {
             const normalizedMcp = this.normalizeServerName(mcp);
-            return normalizedServer.includes(normalizedMcp) || normalizedMcp.includes(normalizedServer);
+            return normalizedServer === normalizedMcp;
           });
         });
         const matchedServers = [...new Set(filteredTools.map(t => t.server))];
@@ -1598,7 +1600,7 @@ ${(() => {
           const normalizedMcp = this.normalizeServerName(mcp);
           return !matchedServers.some(s => {
             const ns = this.normalizeServerName(s);
-            return ns.includes(normalizedMcp) || normalizedMcp.includes(ns);
+            return ns === normalizedMcp;
           });
         });
         console.log(`[buildToolsSchema] Configured MCPs for ${agentName}: [${agentMCPs.join(', ')}], matched: [${matchedServers.join(', ')}], ${filteredTools.length} tools`);

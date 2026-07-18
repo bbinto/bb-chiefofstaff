@@ -175,6 +175,69 @@ export class ReportGenerator {
   }
 
   /**
+   * Inject Slack channel and message permalink links into a slack-digest report.
+   * The model outputs two machine-readable tokens:
+   *   - Channel headers: ### #name (CXXXXXXXX)
+   *   - Post metadata:   | ts:1234567890.123456
+   * This post-processor converts them to clickable markdown links.
+   */
+  injectSlackLinks(output) {
+    const workspaceUrls = {
+      'lannysnewsletter': 'https://lennysnewsletter.slack.com',
+      'womeninproduct':   'https://womeninproduct.slack.com',
+      'rand':             'https://rands-leadership.slack.com',
+    };
+
+    // Detect workspace from section headers containing workspace keywords
+    const workspaceSectionRe = /##\s+.*?(lanny|lennysnewsletter|womeninproduct|women.*product|rand)/i;
+
+    let currentBaseUrl = null;
+    let currentChannelId = null;
+
+    const lines = output.split('\n');
+    const processed = lines.map(line => {
+
+      // ── Detect workspace section ──────────────────────────────────────────
+      const wsMatch = line.match(workspaceSectionRe);
+      if (wsMatch) {
+        const key = wsMatch[1].toLowerCase().replace(/\s+/g, '');
+        if (key.includes('lanny') || key.includes('newsletter')) {
+          currentBaseUrl = workspaceUrls['lannysnewsletter'];
+        } else if (key.includes('women') || key.includes('womeninproduct')) {
+          currentBaseUrl = workspaceUrls['womeninproduct'];
+        } else if (key.includes('rand')) {
+          currentBaseUrl = workspaceUrls['rand'];
+        }
+        currentChannelId = null;
+        return line;
+      }
+
+      // ── Detect channel header: ### #name (CXXXXXXXX) ─────────────────────
+      const chanHeaderRe = /^(#{2,4})\s+\[?#?([\w\-]+)\]?\s*\(?(C[A-Z0-9]{6,})\)?/;
+      const chanMatch = line.match(chanHeaderRe);
+      if (chanMatch && currentBaseUrl) {
+        const [, hashes, chanName, chanId] = chanMatch;
+        currentChannelId = chanId;
+        const url = `${currentBaseUrl}/archives/${chanId}`;
+        return `${hashes} [#${chanName}](${url})`;
+      }
+
+      // ── Inject permalink for ts token: | ts:1234567890.123456 ─────────────
+      const tsRe = /\|\s*ts:([\d]+)\.([\d]*)/;
+      const tsMatch = line.match(tsRe);
+      if (tsMatch && currentBaseUrl && currentChannelId) {
+        const tsNoDoc = tsMatch[1] + (tsMatch[2] || '').padEnd(6, '0');
+        const permalink = `${currentBaseUrl}/archives/${currentChannelId}/p${tsNoDoc}`;
+        return line.replace(tsRe, `| [↗](${permalink})`);
+      }
+
+      return line;
+    });
+
+    return processed.join('\n');
+  }
+
+  /**
    * Build section for an agent's output
    */
   buildAgentSection(result) {
@@ -236,9 +299,14 @@ export class ReportGenerator {
     
     const metadataSection = metadata ? `${metadata}\n` : '';
 
+    let output = result.output;
+    if (result.agentName === 'slack-digest') {
+      output = this.injectSlackLinks(output);
+    }
+
   return `
 
-  ${metadataSection}${result.output}
+  ${metadataSection}${output}
 
 ---
 
