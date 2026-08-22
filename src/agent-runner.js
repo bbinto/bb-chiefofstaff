@@ -706,7 +706,16 @@ export class AgentRunner {
       const maxTools = providerConfig.maxTools ?? 20;
       const priorityServers = (providerConfig.priorityServers || []).map(s => s.toLowerCase());
 
-      if (tools.length > maxTools) {
+      // Custom filesystem tools (report read/write, dedup helpers, etc.) never carry a
+      // `_server` field — they aren't MCP tools and are cheap/always-relevant. Exempt them
+      // from the cap entirely so they can't get silently crowded out by a chatty MCP server
+      // (e.g. 3 Slack workspaces exposing 18 tools each). Only the MCP-sourced tools compete
+      // for the remaining budget.
+      const fsTools = tools.filter(t => !t._server);
+      let mcpTools = tools.filter(t => t._server);
+
+      if (mcpTools.length > maxTools - fsTools.length) {
+        const mcpBudget = Math.max(0, maxTools - fsTools.length);
         // Sort by most-specific priority match: find the highest-ranked (lowest index) priority
         // server whose name is the longest match in the tool's server name. This ensures that
         // "Slack-LannysNewsletter" tools rank at index 0 rather than being displaced by the
@@ -726,13 +735,14 @@ export class AgentRunner {
           };
           // Stable sort: tools with a lower (more specific) priority rank come first;
           // tools with equal rank preserve their original relative order.
-          const withRank = tools.map((t, idx) => ({ t, rank: getPriorityRank(t), idx }));
+          const withRank = mcpTools.map((t, idx) => ({ t, rank: getPriorityRank(t), idx }));
           withRank.sort((a, b) => a.rank !== b.rank ? a.rank - b.rank : a.idx - b.idx);
-          tools = withRank.map(r => r.t);
+          mcpTools = withRank.map(r => r.t);
         }
-        console.warn(`⚠️  ${providerKey} tool limit: capping ${tools.length} tools to ${maxTools}. Priority servers: [${priorityServers.join(', ')}]. Keeping: ${tools.slice(0, maxTools).map(t => t.name).join(', ')}`);
-        tools = tools.slice(0, maxTools);
+        console.warn(`⚠️  ${providerKey} tool limit: capping ${mcpTools.length} MCP tools to ${mcpBudget} (+ ${fsTools.length} always-kept filesystem tools). Priority servers: [${priorityServers.join(', ')}]. Keeping: ${mcpTools.slice(0, mcpBudget).map(t => t.name).join(', ')}`);
+        mcpTools = mcpTools.slice(0, mcpBudget);
       }
+      tools = [...fsTools, ...mcpTools];
       // Strip internal _server field before sending to API
       tools = tools.map(({ _server, ...t }) => t);
     } else {
@@ -950,7 +960,8 @@ export class AgentRunner {
                   toolUse.name === 'list_manual_sources_files' ||
                   toolUse.name === 'list_reports_in_week' ||
                   toolUse.name === 'read_report_file' ||
-                  toolUse.name === 'get_current_time') {
+                  toolUse.name === 'get_current_time' ||
+                  toolUse.name === 'list_recent_reports_by_prefix') {
                 toolResult = await this.handleCustomTool(toolUse.name, toolUse.input);
               } else {
                 // Use MCP client for other tools

@@ -6,7 +6,7 @@
 // API and Model Configuration
 export const API_DEFAULTS = {
   MODEL: 'claude-sonnet-4-6',
-  MAX_TOKENS: 8000, // Conservative limit for compatibility
+  MAX_TOKENS: 16000, // Was 8000 — too small for long multi-section reports (e.g. thoughtleadership-updates), which were getting cut off mid-sentence when the model hit the cap on its final report-writing turn
 };
 
 // Token Limits and Pricing

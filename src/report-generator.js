@@ -297,11 +297,16 @@ export class ReportGenerator {
       metadata += `**LLM**: ${llmLabel} (${result.llmModel})\n`;
     }
     
-    const metadataSection = metadata ? `${metadata}\n` : '';
+    const isThoughtLeadership = result.agentName && result.agentName.startsWith('thoughtleadership');
+    const metadataSection = (metadata && !isThoughtLeadership) ? `${metadata}\n` : '';
 
     let output = result.output;
     if (result.agentName === 'slack-digest') {
       output = this.injectSlackLinks(output);
+    }
+    if (isThoughtLeadership) {
+      const summaryIndex = output.indexOf('### One-Line Executive Summary');
+      if (summaryIndex > 0) output = output.slice(summaryIndex);
     }
 
   return `

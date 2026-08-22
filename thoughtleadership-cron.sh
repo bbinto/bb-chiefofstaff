@@ -3,8 +3,7 @@
 # Thought Leadership Cron Script
 # This script:
 # 1. Generates a thought leadership report
-# 2. Creates a light version
-# 3. Generates a podcast from the light version and uploads it
+# 2. Emails the full report to bbinto@gmail.com
 
 set -eu
 
@@ -66,22 +65,13 @@ log "Report generated: $REPORT_PATH"
 FILENAME=$(basename "$REPORT_PATH" .md)
 log "Extracted filename: $FILENAME"
 
-# Step 2: Create light version
-log "Step 2: Creating light version..."
-if npm run light -- "$FILENAME" 2>&1 | tee -a "$LOG_FILE"; then
-  log "Light version created successfully: ${FILENAME}-light.md"
+# Step 1b: Email the full report
+log "Step 1b: Emailing full report to bbinto@gmail.com..."
+EMAIL_SUBJECT="Thought Leadership Updates: ${FILENAME}"
+if python3 "$PROJECT_DIR/scripts/send-email.py" "bbinto@gmail.com" "$EMAIL_SUBJECT" "$REPORT_PATH" 2>&1 | tee -a "$LOG_FILE"; then
+  log "Email sent successfully"
 else
-  log "ERROR: Failed to create light version"
-  exit 1
-fi
-
-# Step 3: Generate podcast from light version and upload
-log "Step 3: Generating podcast from light version and uploading..."
-if sh podcast.sh "${FILENAME}-light" 2>&1 | tee -a "$LOG_FILE"; then
-  log "Podcast created and uploaded successfully: ${FILENAME}-light.mp3"
-else
-  log "ERROR: Failed to create or upload podcast"
-  exit 1
+  log "WARNING: Failed to send email (continuing workflow)"
 fi
 
 log "==================================================================="
