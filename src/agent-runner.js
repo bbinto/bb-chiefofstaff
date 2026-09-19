@@ -1466,8 +1466,8 @@ Specific Network (bookmark IDs): ${specificNetwork}
 
 ## Thought Leadership
 RSS Feeds: ${(this.config.thoughtleadership?.rssFeeds || []).join(', ') || 'None'}
-HR News RSS: ${(this.config.thoughtleadership?.hrNewsRSS || []).join(', ') || 'None'}
 AI Critics: ${(this.config.thoughtleadership?.AICritics || []).join(', ') || 'None'}
+Workforce Intelligence Feeds: ${(this.config.thoughtleadership?.workforceIntelligenceFeeds || []).join(', ') || 'None'}
 Web Sources: ${(this.config.thoughtleadership?.webSources || []).join(', ') || 'None'}
 Industry News Sources: ${(this.config.thoughtleadership?.industryNewsSources || []).join(', ') || 'None'}
 Reddit Sources (top ${this.config.thoughtleadership?.redditSources?.topPosts || 3} posts each): ${(this.config.thoughtleadership?.redditSources?.subreddits || []).map(s => `${s.name} (${s.reason})`).join(', ') || 'None'}
